@@ -2,7 +2,6 @@
 
 # OpenSERP
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
 [![release](https://img.shields.io/github/v/release/karust/openserp)](https://github.com/karust/openserp/releases)
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/r/karust/openserp)
@@ -12,7 +11,7 @@
 
 Use it as a search tool for **LLMs, agents, and RAG pipelines**, or as a scraper backend for **SEO rank tracking across Google, Yandex, Baidu, and more**. It is especially useful when your workflow needs RU/CN web coverage instead of another Google-only API.
 
-Run it locally, self-host it, or use [cloud version](https://openserp.org/cloud) when you want the same public API shape without operating the server.
+Run it locally, self-host it, or use the [cloud version](https://openserp.org/cloud) when you want the same public API shape without operating the server. Cloud is also the simplest way to support OpenSERP: it is where the technology gets tested at scale, and that work flows straight back into this open-source project.
 
 ## Features
 
@@ -166,9 +165,11 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
 ## Deployment Options
 
 - **Self-hosted (this repo)** - free, MIT-licensed, with full control over runtime, proxies, cache, and scaling.
-- **[OpenSERP Cloud](https://openserp.org/cloud)** - optional managed version from the project maintainers, with the same API shape.
+- **[OpenSERP Cloud](https://openserp.org/cloud)** - the same public API, run and maintained for you by the people who build OpenSERP.
 
-The hosted API helps fund continued development of the open-source project. Same endpoints, same response schema, and client code can migrate either direction.
+Same endpoints, same response schema, and client code migrates either direction, so you are never locked in.
+
+If OpenSERP is useful to you and you would rather not run the infrastructure yourself, using Cloud (or topping up an account) is a direct way to support the project. It is where the technology gets exercised against real traffic at scale, which is how the engines get hardened, new features get tested, and the open-source core keeps improving. Every request you send through Cloud helps fund and shape what lands back in this repository.
 
 ## API Docs
 
@@ -183,12 +184,12 @@ To browse the spec without running the server, see [docs/openapi.yaml](./docs/op
 
 Official client packages. Each works against your self-hosted server (set `baseUrl`) or the [hosted API](https://openserp.org/cloud) (set `apiKey`):
 
-| Type                        | Package                                                                                      | Install                         |
-| --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
-| JavaScript / TypeScript SDK | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk)                               | `npm install @openserp/sdk`     |
-| Python SDK                  | [`openserp`](https://pypi.org/project/openserp/)                                             | `pip install openserp`          |
-| MCP server (AI agents)      | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | `npx @openserp/mcp`             |
-| n8n community node          | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | Install via n8n community nodes |
+| Type                        | Package                                                                                      | Source                                                              | Install                         |
+| --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------- |
+| JavaScript / TypeScript SDK | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk)                               | [openserpapi/sdk-js](https://github.com/openserpapi/sdk-js)         | `npm install @openserp/sdk`     |
+| Python SDK                  | [`openserp`](https://pypi.org/project/openserp/)                                             | [openserpapi/sdk-python](https://github.com/openserpapi/sdk-python) | `pip install openserp`          |
+| MCP server (AI agents)      | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | [openserpapi/mcp](https://github.com/openserpapi/mcp)               | `npx @openserp/mcp`             |
+| n8n community node          | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | [openserpapi/n8n](https://github.com/openserpapi/n8n)               | Install via n8n community nodes |
 
 See [**examples**](./examples) for small JavaScript and Python use cases covering search, AI grounding, SEO, content extraction, and image search.
 
@@ -515,6 +516,6 @@ Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
 - [GitHub Issues](https://github.com/karust/openserp/issues) - bugs, feature ideas, and reproducible issues.
 - [feedback@openserp.org](mailto:feedback@openserp.org) - private notes, longer feedback, or anything that does not fit GitHub Issues.
-- [Telegram Channel](https://t.me/+RJEKspw3mUlhZDMy) - OpenSERP news, release notes, and project updates. Direct messages are open for quick feedback and hosted API questions.
+- [Telegram Channel](https://t.me/+RJEKspw3mUlhZDMy) - OpenSERP news, release notes, and project updates.
 
 > OpenSERP is free and open-source. Only links listed in this repository and on [openserp.org](https://openserp.org) are associated with the project.

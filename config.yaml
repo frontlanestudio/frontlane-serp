@@ -14,6 +14,8 @@ app:
   head: false # Headful mode
   leakless: false # Force browser process cleanup after request
   leave_head: false # Keep tabs open after request
+  block_resources: "image,font,css,media" # Block heavy subresources in browser mode
+  block_trackers: true # Block known tracker domains
   max_processes: 6 # Concurrent Chrome processes
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
 

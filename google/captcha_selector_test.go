@@ -25,6 +25,9 @@ func TestGooglePageTypeSelectors(t *testing.T) {
 		{"search_captcha_new.html", Selectors.CaptchaPage, true},
 		{"search_captcha_new.html", Selectors.ResultStats, false},
 
+		{"search_sorry.html", Selectors.CaptchaPage, true},
+		{"search_sorry.html", Selectors.ResultStats, false},
+
 		{"search_soft_block.html", Selectors.SoftBlock, true},
 		{"search_soft_block.html", Selectors.Captcha, false},
 		{"search_soft_block.html", Selectors.CaptchaPage, false},
@@ -60,7 +63,7 @@ func assertSelector(t *testing.T, fixture, selector string, wantHit bool) {
 	got := doc.Find(selector).Length() > 0
 	if got != wantHit {
 		if wantHit {
-			t.Fatalf("selector %q not found in %s — update selectors.go", selector, fixture)
+			t.Fatalf("selector %q not found in %s - update selectors.go", selector, fixture)
 		} else {
 			t.Fatalf("selector %q unexpectedly present in %s", selector, fixture)
 		}

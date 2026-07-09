@@ -29,11 +29,13 @@ var Selectors = struct {
 	ImageTitle        []string
 }{
 	Captcha:     "[data-sitekey]",
-	CaptchaPage: "form#captcha-form, [data-sitekey], .g-recaptcha, script[src*='recaptcha']",
+	CaptchaPage: "form#captcha-form, form[action*='/sorry/'], body[onload*='captcha'], [data-sitekey], .g-recaptcha, script[src*='recaptcha']",
 	// CaptchaMarkers is the page-text fallback for captcha variants whose
 	// markup doesn't match CaptchaPage.
 	CaptchaMarkers: []string{
-		"our systems have detected unusual traffic",
+		"detected unusual traffic",
+		"unusual traffic from your computer network",
+		"before you continue",
 		"not a robot",
 		"solve the captcha",
 	},

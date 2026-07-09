@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -77,14 +78,17 @@ func TestLaneStoreEvictsLRU(t *testing.T) {
 	}
 }
 
-func TestProxyLaneKeyForOmitsPassword(t *testing.T) {
+func TestProxyLaneKeyForUsesCredentialIdentity(t *testing.T) {
 	a := ProxyLaneKeyForTenant("Google", "", Query{}, "http://user:pass-a@proxy.example:8080")
 	b := ProxyLaneKeyForTenant("google", "", Query{}, "http://user:pass-b@proxy.example:8080")
 	if a.Empty() || b.Empty() {
 		t.Fatalf("expected derived lane keys, got %#v %#v", a, b)
 	}
-	if a != b {
-		t.Fatalf("expected password changes not to affect lane key: %#v %#v", a, b)
+	if a == b {
+		t.Fatalf("expected password changes to produce separate lane keys: %#v", a)
+	}
+	if strings.Contains(a.ID(), "pass-a") || strings.Contains(b.ID(), "pass-b") {
+		t.Fatalf("lane key leaked password material: %#v %#v", a, b)
 	}
 }
 

@@ -236,11 +236,11 @@ func proxyLaneIDFromProxyURL(raw string) string {
 	if err != nil {
 		return ""
 	}
-	username := ""
+	userInfo := ""
 	if parsed.User != nil {
-		username = parsed.User.Username()
+		userInfo = parsed.User.String()
 	}
-	sum := sha256.Sum256([]byte(parsed.Host + "|" + username))
+	sum := sha256.Sum256([]byte(parsed.Scheme + "|" + parsed.Host + "|" + userInfo))
 	return hex.EncodeToString(sum[:])[:16]
 }
 

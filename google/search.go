@@ -116,7 +116,15 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 // needs the live page's captcha element attributes.
 func (gogl *Google) classifyPage(page *rod.Page, queryProxyURL string) error {
 	err := core.ClassifyFromPage(page, classifyGoogleDocument)
-	if !errors.Is(err, core.ErrCaptcha) || gogl.solveCaptchaOnPage(page, queryProxyURL) {
+	if page != nil {
+		if info, infoErr := page.Info(); infoErr == nil && isGoogleSorryURL(info.URL) {
+			err = core.ErrCaptcha
+		}
+	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, core.ErrCaptcha) && gogl.solveCaptchaOnPage(page, queryProxyURL) {
 		return nil
 	}
 	return err

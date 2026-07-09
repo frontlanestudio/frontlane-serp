@@ -30,27 +30,43 @@ func TestCommandDefaultsToQuiet(t *testing.T) {
 
 func TestBrowserPoolKey(t *testing.T) {
 	cases := []struct {
-		name string
-		raw  string
-		want string
+		name       string
+		raw        string
+		wantDirect bool
+		wantPrefix string
 	}{
-		{"empty -> direct", "", directBrowserKey},
-		{"unauth http -> direct", "http://proxy.example:8080", directBrowserKey},
-		{"unauth socks -> direct", "socks5://proxy.example:1080", directBrowserKey},
-		{"auth socks -> direct (rejected upstream)", "socks5://user:pass@proxy.example:1080", directBrowserKey},
-		{"auth http", "http://user:pass@proxy.example:8080", "http|proxy.example:8080|user"},
-		{"auth https different scheme", "https://user:pass@proxy.example:8443", "https|proxy.example:8443|user"},
-		{"different password same key", "http://user:other-pass@proxy.example:8080", "http|proxy.example:8080|user"},
-		{"different user different key", "http://user2:pass@proxy.example:8080", "http|proxy.example:8080|user2"},
-		{"different host different key", "http://user:pass@proxy2.example:8080", "http|proxy2.example:8080|user"},
-		{"different port different key", "http://user:pass@proxy.example:9090", "http|proxy.example:9090|user"},
+		{"empty -> direct", "", true, ""},
+		{"unauth http -> direct", "http://proxy.example:8080", true, ""},
+		{"unauth socks -> direct", "socks5://proxy.example:1080", true, ""},
+		{"auth socks -> direct (rejected upstream)", "socks5://user:pass@proxy.example:1080", true, ""},
+		{"auth http", "http://user:pass@proxy.example:8080", false, "http|proxy.example:8080|user|"},
+		{"auth https different scheme", "https://user:pass@proxy.example:8443", false, "https|proxy.example:8443|user|"},
+		{"different user different key", "http://user2:pass@proxy.example:8080", false, "http|proxy.example:8080|user2|"},
+		{"different host different key", "http://user:pass@proxy2.example:8080", false, "http|proxy2.example:8080|user|"},
+		{"different port different key", "http://user:pass@proxy.example:9090", false, "http|proxy.example:9090|user|"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := browserPoolKey(tc.raw); got != tc.want {
-				t.Fatalf("browserPoolKey(%q) = %q, want %q", tc.raw, got, tc.want)
+			got := browserPoolKey(tc.raw)
+			if tc.wantDirect {
+				if got != directBrowserKey {
+					t.Fatalf("browserPoolKey(%q) = %q, want %q", tc.raw, got, directBrowserKey)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Fatalf("browserPoolKey(%q) = %q, want prefix %q", tc.raw, got, tc.wantPrefix)
+			}
+			if strings.Contains(got, "pass") {
+				t.Fatalf("browser pool key leaked password material: %q", got)
 			}
 		})
+	}
+
+	first := browserPoolKey("http://user:pass@proxy.example:8080")
+	second := browserPoolKey("http://user:other-pass@proxy.example:8080")
+	if first == second {
+		t.Fatalf("expected different passwords to produce different browser pool keys: %q", first)
 	}
 }
 
@@ -73,6 +89,28 @@ func TestBrowserLaunchURL(t *testing.T) {
 				t.Fatalf("browserLaunchURL(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBrowserPoolGlobalProxyDoesNotOccupyDirectSlot(t *testing.T) {
+	globalProxy := "http://user:pass@proxy.example:8080"
+	pool := newBrowserPool(core.BrowserOpts{}, globalProxy, nil, 2, 0)
+	defer func() {
+		if err := pool.close(); err != nil {
+			t.Fatalf("close pool: %v", err)
+		}
+	}()
+
+	if _, ok := pool.browsers[directBrowserKey]; ok {
+		t.Fatalf("global proxy must not occupy %q browser slot", directBrowserKey)
+	}
+	key := browserPoolKey(globalProxy)
+	entry, ok := pool.browsers[key]
+	if !ok {
+		t.Fatalf("expected global proxy slot %q to be pre-bound", key)
+	}
+	if entry.launchProxyURL != globalProxy {
+		t.Fatalf("expected launch proxy %q, got %q", globalProxy, entry.launchProxyURL)
 	}
 }
 

@@ -106,6 +106,7 @@ func TestGoogleClassifyRawHTML(t *testing.T) {
 		{name: "no results", fixture: "search_no_results.html", want: core.ErrEmptyResult},
 		{name: "captcha page", fixture: "search_captcha.html", want: core.ErrCaptcha},
 		{name: "new captcha page", fixture: "search_captcha_new.html", want: core.ErrCaptcha},
+		{name: "sorry challenge page", fixture: "search_sorry.html", want: core.ErrCaptcha},
 		{name: "soft block page", fixture: "search_soft_block.html", want: core.ErrBlocked},
 	}
 

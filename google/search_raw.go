@@ -119,6 +119,10 @@ func classifyGoogleRawHTML(body []byte) error {
 	return classifyGoogleDocument(doc)
 }
 
+func isGoogleSorryURL(rawURL string) bool {
+	return strings.Contains(strings.ToLower(rawURL), "/sorry/")
+}
+
 func classifyGoogleDocument(doc *goquery.Document) error {
 	if isGoogleCaptchaDocument(doc) {
 		return core.ErrCaptcha
@@ -185,6 +189,9 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	core.WithRequest(ctx).WithField("status_code", res.StatusCode).Debug(
 		fmt.Sprintf("Google Raw response: code=%d", res.StatusCode),
 	)
+	if res.Request != nil && res.Request.URL != nil && isGoogleSorryURL(res.Request.URL.String()) {
+		return nil, core.ErrCaptcha
+	}
 
 	body, err := core.ReadRawSearchBody(res)
 	if err != nil {

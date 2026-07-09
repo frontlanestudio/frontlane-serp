@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -289,12 +291,12 @@ func newBrowserPool(base core.BrowserOpts, defaultLaunchProxyURL string, laneSto
 		stopSweeper:  make(chan struct{}),
 		sweeperDone:  make(chan struct{}),
 	}
-	// A configured global proxy (legacy) becomes a pre-bound entry on the
-	// shared "direct" key so requests without a per-request proxy still use it.
 	if launchURL := strings.TrimSpace(defaultLaunchProxyURL); launchURL != "" {
-		pool.browsers[directBrowserKey] = &pooledBrowser{
-			launchProxyURL: launchURL,
-			lastUsedAt:     time.Now(),
+		if key := browserPoolKey(launchURL); key != directBrowserKey {
+			pool.browsers[key] = &pooledBrowser{
+				launchProxyURL: launchURL,
+				lastUsedAt:     time.Now(),
+			}
 		}
 	}
 	if idleTTL > 0 {
@@ -306,7 +308,8 @@ func newBrowserPool(base core.BrowserOpts, defaultLaunchProxyURL string, laneSto
 }
 
 // browserPoolKey derives the pool key from a request's proxy URL. Authenticated
-// HTTP/HTTPS proxies get their own Chrome keyed by scheme+host+port+username.
+// HTTP/HTTPS proxies get their own Chrome keyed by scheme+host+port+username
+// plus a short auth hash, so provider session tokens do not share one Chrome.
 // Empty/unauthenticated/SOCKS request URLs fall through to the shared
 // "direct" Chrome.
 func browserPoolKey(requestProxyURL string) string {
@@ -330,8 +333,10 @@ func browserPoolKey(requestProxyURL string) string {
 	if parsed.User == nil {
 		return directBrowserKey
 	}
-	username := parsed.User.Username()
-	return fmt.Sprintf("%s|%s|%s", parsed.Scheme, parsed.Host, username)
+	// Hash the full userinfo so a rotating password gets its own Chrome without
+	// leaking credentials into the key. Scheme+host+username stay readable.
+	sum := sha256.Sum256([]byte(parsed.User.String()))
+	return fmt.Sprintf("%s|%s|%s|%s", parsed.Scheme, parsed.Host, parsed.User.Username(), hex.EncodeToString(sum[:])[:16])
 }
 
 // browserLaunchURL returns the URL to pass to launcher.Proxy for a given
