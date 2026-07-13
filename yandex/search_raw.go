@@ -19,7 +19,7 @@ func classifyYandexRawHTML(body []byte) error {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, "yandex", false)
+	ctx = core.PrepareEngineContext(ctx, query, "yandex")
 
 	startPage, skipOnFirstPage, err := core.ComputePagination(query.Start, 10)
 	if err != nil {

@@ -57,7 +57,7 @@ func imageResultParser(response *http.Response) ([]core.SearchResult, error) {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, "ecosia", false)
+	ctx = core.PrepareEngineContext(ctx, query, "ecosia")
 
 	pageNum, startRank, err := startPage(query.Start)
 	if err != nil {

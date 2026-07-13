@@ -69,12 +69,71 @@ func TestSelectProfileForSession(t *testing.T) {
 		}
 	})
 
-	t.Run("ru region returns ru-tagged profile", func(t *testing.T) {
+	t.Run("locale does not change hardware profile pool", func(t *testing.T) {
 		p := SelectProfileForSession("yandex", "ru", "some-session")
-		if !slices.Contains(p.Tags, "ru") {
-			t.Fatalf("expected ru-tagged profile, got ID=%q tags=%v", p.ID, p.Tags)
+		if slices.Contains(p.Tags, "ru") {
+			t.Fatalf("expected locale-neutral profile, got ID=%q tags=%v", p.ID, p.Tags)
 		}
 	})
+}
+
+func TestEligibleProfilesMatchRuntimePlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		tag  string
+	}{
+		{goos: "linux", tag: "linux"},
+		{goos: "windows", tag: "windows"},
+		{goos: "darwin", tag: "macos"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			pool := eligibleProfiles(tt.goos, false)
+			if len(pool) == 0 {
+				t.Fatal("expected eligible profiles")
+			}
+			for _, candidate := range pool {
+				if !slices.Contains(candidate.profile.Tags, tt.tag) {
+					t.Fatalf("profile %q does not match %s", candidate.profile.ID, tt.goos)
+				}
+			}
+		})
+	}
+}
+
+// Headless Linux (the Docker deployment) has no real GPU, so only
+// swiftshader-tagged profiles are eligible; headful Linux excludes them.
+func TestEligibleProfilesHeadlessLinuxUsesSwiftShader(t *testing.T) {
+	headless := eligibleProfiles("linux", true)
+	if len(headless) == 0 {
+		t.Fatal("expected a Linux SwiftShader profile")
+	}
+	for _, candidate := range headless {
+		if !slices.Contains(candidate.profile.Tags, "swiftshader") {
+			t.Fatalf("headless profile %q is not a SwiftShader profile", candidate.profile.ID)
+		}
+	}
+	if len(headless) < 2 {
+		t.Fatalf("expected multiple SwiftShader profiles so Docker is not a single fingerprint, got %d", len(headless))
+	}
+	timezones := make(map[string]struct{}, len(headless))
+	for _, candidate := range headless {
+		timezones[candidate.profile.Timezone] = struct{}{}
+	}
+	if len(timezones) < 2 {
+		t.Fatalf("expected distinct CDP-visible SwiftShader profiles, got timezones %v", timezones)
+	}
+
+	headful := eligibleProfiles("linux", false)
+	if len(headful) == 0 {
+		t.Fatal("expected headful Linux profiles")
+	}
+	for _, candidate := range headful {
+		if slices.Contains(candidate.profile.Tags, "swiftshader") {
+			t.Fatalf("headful profile %q should not be a SwiftShader profile", candidate.profile.ID)
+		}
+	}
 }
 
 func TestNormalizeRegion(t *testing.T) {

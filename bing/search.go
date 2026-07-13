@@ -155,7 +155,7 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank *core.Rank
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, bing.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, bing.Name())
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)
 	bing = &scoped
@@ -256,7 +256,7 @@ func resolveImageLinkElement(container *rod.Element) (*rod.Element, error) {
 // SearchImage executes a Bing image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.PrepareEngineContext(ctx, query, bing.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, bing.Name())
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)
 	bing = &scoped

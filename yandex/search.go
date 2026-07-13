@@ -191,7 +191,7 @@ func (yand *Yandex) parseImageEntities(items rod.Elements) map[string]ImageEntit
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, yand.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, yand.Name())
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)
 	yand = &scoped
@@ -286,7 +286,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Yandex image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.PrepareEngineContext(ctx, query, yand.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, yand.Name())
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)
 	yand = &scoped

@@ -149,7 +149,7 @@ func ddgElementHasAdMarker(el *rod.Element) bool {
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, ddg.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, ddg.Name())
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)
 	ddg = &scoped
@@ -229,7 +229,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 // SearchImage executes a DuckDuckGo image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.PrepareEngineContext(ctx, query, ddg.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, ddg.Name())
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)
 	ddg = &scoped

@@ -39,12 +39,9 @@ func IsContextDone(err error) bool {
 
 // PrepareEngineContext applies request-scoped metadata expected by all engine
 // search implementations.
-func PrepareEngineContext(ctx context.Context, query Query, engineName string, minimalBrowserProfile bool) context.Context {
+func PrepareEngineContext(ctx context.Context, query Query, engineName string) context.Context {
 	ctx = WithEngine(EnsureContext(ctx), engineName)
 	ctx = WithProfileRegion(ctx, profileRegionHint(query))
-	if minimalBrowserProfile {
-		ctx = WithMinimalBrowserProfile(ctx)
-	}
 	return WithQueryHash(ctx, QueryHashFromQuery(query))
 }
 

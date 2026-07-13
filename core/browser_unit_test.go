@@ -61,6 +61,61 @@ func TestResolveBrowserBinaryPathRejectsInvalidExplicit(t *testing.T) {
 	}
 }
 
+func TestBrowserLaunchLanguageIsProcessStable(t *testing.T) {
+	tests := []struct {
+		name string
+		opts BrowserOpts
+		want string
+	}{
+		{name: "default locale", opts: BrowserOpts{}, want: "en-US"},
+		{name: "request hint does not change process locale", opts: BrowserOpts{LanguageCode: "de"}, want: "en-US"},
+		{name: "regional hint does not change process locale", opts: BrowserOpts{LanguageCode: "en-GB"}, want: "en-US"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := browserLaunchLanguage(tt.opts); got != tt.want {
+				t.Fatalf("browserLaunchLanguage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProfileNavigatorLanguagesStripsHeaderWeights(t *testing.T) {
+	profile := browserprofile.Profile{
+		AcceptLanguage: "en-US,en;q=0.9",
+		NavigatorLangs: []string{"en-US"},
+	}
+
+	got := profileNavigatorLanguages(profile)
+	want := []string{"en-US", "en"}
+	if len(got) != len(want) {
+		t.Fatalf("profileNavigatorLanguages() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("profileNavigatorLanguages() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestProfileNavigatorLanguagesForRuntime(t *testing.T) {
+	profile := browserprofile.Profile{
+		AcceptLanguage: "en-US,en;q=0.9",
+		NavigatorLangs: []string{"en-US"},
+	}
+
+	linuxHeadless := profileNavigatorLanguagesForRuntime(profile, "linux", true)
+	if len(linuxHeadless) != 1 || linuxHeadless[0] != "en-US" {
+		t.Fatalf("linux headless languages = %v, want [en-US]", linuxHeadless)
+	}
+
+	windowsHeadless := profileNavigatorLanguagesForRuntime(profile, "windows", true)
+	if len(windowsHeadless) != 2 || windowsHeadless[0] != "en-US" || windowsHeadless[1] != "en" {
+		t.Fatalf("windows headless languages = %v, want [en-US en]", windowsHeadless)
+	}
+}
+
 func TestMinPositiveDuration(t *testing.T) {
 	tests := []struct {
 		name string
@@ -92,6 +147,35 @@ func TestApplyProfileLanguageHintRewritesTimezone(t *testing.T) {
 	got := applyProfileLanguageHint(profile, "de-DE")
 	if got.Timezone != "Europe/Berlin" {
 		t.Fatalf("expected timezone Europe/Berlin, got %q", got.Timezone)
+	}
+}
+
+func TestRemoveChromeBrand(t *testing.T) {
+	profile := browserprofile.Profile{
+		UACHBrands: []browserprofile.BrandVersion{
+			{Brand: "Not_A Brand", Version: "24"},
+			{Brand: "Chromium", Version: "136"},
+			{Brand: "Google Chrome", Version: "136"},
+		},
+		UACHFullVerList: []browserprofile.BrandVersion{
+			{Brand: "Chromium", Version: "136.0.0.0"},
+			{Brand: "Google Chrome", Version: "136.0.0.0"},
+		},
+	}
+
+	got := removeChromeBrand(profile)
+	for _, brand := range got.UACHBrands {
+		if brand.Brand == "Google Chrome" {
+			t.Fatal("expected Google Chrome brand to be removed from UACHBrands")
+		}
+	}
+	for _, brand := range got.UACHFullVerList {
+		if brand.Brand == "Google Chrome" {
+			t.Fatal("expected Google Chrome brand to be removed from UACHFullVerList")
+		}
+	}
+	if len(got.UACHBrands) != 2 || len(got.UACHFullVerList) != 1 {
+		t.Fatalf("unexpected brand counts: brands=%d fullList=%d", len(got.UACHBrands), len(got.UACHFullVerList))
 	}
 }
 

@@ -419,13 +419,36 @@ func rawRequestProfileFor(ctx context.Context, query Query) rawRequestProfile {
 
 func applyRawChromeMajor(profile browserprofile.Profile, major int) browserprofile.Profile {
 	version := strconv.Itoa(major)
-	if extractChromeVersion(profile.UserAgent) == "" {
+	if template := strings.TrimSpace(profile.UserAgentTemplate); template != "" {
+		profile.UserAgent = strings.ReplaceAll(template, "{chrome_major}", version)
+	} else if extractChromeVersion(profile.UserAgent) == "" {
 		profile.UserAgent = fallbackRawUserAgent
+	} else {
+		profile.UserAgent = replaceChromeUserAgentVersion(profile.UserAgent, version+".0.0.0")
 	}
-	profile.UserAgent = replaceChromeUserAgentVersion(profile.UserAgent, version+".0.0.0")
-	profile.UACHBrands = patchBrandVersions(profile.UACHBrands, version, false)
-	profile.UACHFullVerList = patchBrandVersions(profile.UACHFullVerList, version+".0.0.0", true)
+	if len(profile.UACHBrands) == 0 {
+		profile.UACHBrands = rawUACHBrands(version, false)
+	} else {
+		profile.UACHBrands = patchBrandVersions(profile.UACHBrands, version, false)
+	}
+	if len(profile.UACHFullVerList) == 0 {
+		profile.UACHFullVerList = rawUACHBrands(version+".0.0.0", true)
+	} else {
+		profile.UACHFullVerList = patchBrandVersions(profile.UACHFullVerList, version+".0.0.0", true)
+	}
 	return profile
+}
+
+func rawUACHBrands(version string, full bool) []browserprofile.BrandVersion {
+	notABrandVersion := "24"
+	if full {
+		notABrandVersion = "24.0.0.0"
+	}
+	return []browserprofile.BrandVersion{
+		{Brand: "Not_A Brand", Version: notABrandVersion},
+		{Brand: "Chromium", Version: version},
+		{Brand: "Google Chrome", Version: version},
+	}
 }
 
 func rawProfileRegion(ctx context.Context, query Query) string {

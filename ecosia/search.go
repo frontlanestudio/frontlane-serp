@@ -105,7 +105,7 @@ func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchR
 // Search executes an Ecosia web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, e.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, e.Name())
 	scoped := *e
 	scoped.logger = e.logger.WithRequest(ctx)
 	e = &scoped
@@ -237,7 +237,7 @@ func elementText(el *rod.Element, selector string) string {
 // query.Start is ignored: per-page card count varies, so callers should
 // drive depth through query.Limit alone.
 func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, e.Name(), false)
+	ctx = core.PrepareEngineContext(ctx, query, e.Name())
 	scoped := *e
 	scoped.logger = e.logger.WithRequest(ctx)
 	e = &scoped

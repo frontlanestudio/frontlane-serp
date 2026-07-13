@@ -23,24 +23,23 @@ type Viewport struct {
 }
 
 type Profile struct {
-	ID              string         `json:"id"`
-	UserAgent       string         `json:"user_agent"`
-	UACHBrands      []BrandVersion `json:"uach_brands"`
-	UACHFullVerList []BrandVersion `json:"uach_full_version_list"`
-	Platform        string         `json:"platform"`
-	PlatformVersion string         `json:"platform_version"`
-	Architecture    string         `json:"architecture"`
-	Bitness         string         `json:"bitness"`
-	Mobile          bool           `json:"mobile"`
-	AcceptLanguage  string         `json:"accept_language"`
-	NavigatorLangs  []string       `json:"navigator_langs"`
-	Locale          string         `json:"locale"`
-	Timezone        string         `json:"timezone"`
-	Viewport        Viewport       `json:"viewport"`
-	WebGLVendor     string         `json:"webgl_vendor"`
-	WebGLRenderer   string         `json:"webgl_renderer"`
-	Tags            []string       `json:"tags"`
-	Weight          int            `json:"weight"`
+	ID                string         `json:"id"`
+	UserAgentTemplate string         `json:"user_agent_template"`
+	UserAgent         string         `json:"user_agent,omitempty"`
+	UACHBrands        []BrandVersion `json:"uach_brands,omitempty"`
+	UACHFullVerList   []BrandVersion `json:"uach_full_version_list,omitempty"`
+	Platform          string         `json:"platform"`
+	PlatformVersion   string         `json:"platform_version"`
+	Architecture      string         `json:"architecture"`
+	Bitness           string         `json:"bitness"`
+	Mobile            bool           `json:"mobile"`
+	AcceptLanguage    string         `json:"accept_language"`
+	NavigatorLangs    []string       `json:"navigator_langs"`
+	Locale            string         `json:"locale"`
+	Timezone          string         `json:"timezone"`
+	Viewport          Viewport       `json:"viewport"`
+	Tags              []string       `json:"tags"`
+	Weight            int            `json:"weight"`
 }
 
 type catalogConfig struct {
@@ -51,17 +50,12 @@ type catalogConfig struct {
 
 const (
 	ProfileChromeWinUS   = "chrome-win-uhd620"
-	ProfileChromeWinRU   = "chrome-win-ru"
 	ProfileChromeMacUS   = "chrome-macos-intel-iris"
 	ProfileChromeLinuxUS = "chrome-linux-mesa-uhd620"
-	ProfileChromeLinuxRU = "chrome-linux-ru"
 )
 
 //go:embed profiles.json
 var defaultProfilesJSON []byte
-
-//go:embed patch.js
-var PatchJS []byte
 
 var profileCatalogMu sync.RWMutex
 
@@ -110,8 +104,8 @@ func loadProfilesFromJSONBytes(data []byte) error {
 		if profile.ID == "" {
 			return fmt.Errorf("profiles[%d].id is empty", i)
 		}
-		if strings.TrimSpace(profile.UserAgent) == "" {
-			return fmt.Errorf("profiles[%d].user_agent is empty", i)
+		if strings.TrimSpace(profile.UserAgentTemplate) == "" && strings.TrimSpace(profile.UserAgent) == "" {
+			return fmt.Errorf("profiles[%d] has no user_agent_template or user_agent", i)
 		}
 		if _, exists := nextCatalog[profile.ID]; exists {
 			return fmt.Errorf("duplicate profile id %q", profile.ID)
@@ -201,6 +195,13 @@ func SelectProfile(engine string, region string) Profile {
 // Non-empty salt uses weighted selection seeded by FNV-1a hash of salt,
 // giving each session a stable but varied profile.
 func SelectProfileForSession(engine, region, salt string) Profile {
+	return SelectProfileForSessionHeadless(engine, region, salt, false)
+}
+
+// SelectProfileForSessionHeadless is SelectProfileForSession, but headless Linux
+// (the Docker deployment) renders WebGL via SwiftShader, so it only picks
+// swiftshader-tagged profiles. Runtimes with a real GPU exclude them.
+func SelectProfileForSessionHeadless(engine, region, salt string, headless bool) Profile {
 	engine = NormalizeEngine(engine)
 	region = NormalizeRegion(region)
 	if region == "" {
@@ -215,7 +216,7 @@ func SelectProfileForSession(engine, region, salt string) Profile {
 		return profileByID(profileID)
 	}
 
-	pool := eligibleProfiles(engine, region)
+	pool := eligibleProfiles(runtime.GOOS, headless)
 	return pickWeighted(pool, salt)
 }
 
@@ -224,10 +225,11 @@ type weightedProfile struct {
 	weight  int
 }
 
-// eligibleProfiles builds the weighted pool for (engine, region).
-// Linux profiles are preferred 4x on linux runtime; Windows 4x on windows; macOS 4x on darwin.
-// Profiles tagged "ru" are included only when region == "ru"; "ru"-tagged profiles are excluded otherwise.
-func eligibleProfiles(engine, region string) []weightedProfile {
+// eligibleProfiles builds the pool for the runtime platform. Headless Linux
+// keeps only swiftshader-tagged profiles (SwiftShader WebGL); a real GPU
+// excludes them. We no longer spoof WebGL, so the GPU sub-tag (nvidia/amd/mesa)
+// only steers selection - it matches reality on Docker, cosmetic on a headful box.
+func eligibleProfiles(goos string, headless bool) []weightedProfile {
 	profileCatalogMu.RLock()
 	snap := make([]Profile, 0, len(catalog))
 	for _, p := range catalog {
@@ -240,50 +242,52 @@ func eligibleProfiles(engine, region string) []weightedProfile {
 		return strings.Compare(a.ID, b.ID)
 	})
 
-	goos := runtime.GOOS
+	platformTag := runtimePlatformTag(goos)
+	wantSwiftShader := headless && goos == "linux"
 
 	var pool []weightedProfile
 	for _, p := range snap {
-		isRu := slices.Contains(p.Tags, "ru")
-		if region == "ru" && !isRu {
+		if platformTag != "" && !slices.Contains(p.Tags, platformTag) {
 			continue
 		}
-		if region != "ru" && isRu {
+		if slices.Contains(p.Tags, "swiftshader") != wantSwiftShader {
 			continue
 		}
-
 		w := p.Weight
 		if w <= 0 {
 			w = 1
 		}
 
-		platformLower := strings.ToLower(p.Platform)
-		switch goos {
-		case "linux":
-			if platformLower == "linux" {
-				w *= 4
-			}
-		case "windows":
-			if platformLower == "windows" {
-				w *= 4
-			}
-		case "darwin":
-			if platformLower == "macos" {
-				w *= 4
-			}
-		}
-
 		pool = append(pool, weightedProfile{profile: p, weight: w})
 	}
 
+	// Fall back to the platform pool if no swiftshader profile exists yet, so
+	// selection never returns empty.
+	if len(pool) == 0 && wantSwiftShader {
+		return eligibleProfiles(goos, false)
+	}
+
 	return pool
+}
+
+func runtimePlatformTag(goos string) string {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "windows":
+		return "windows"
+	case "darwin":
+		return "macos"
+	case "linux":
+		return "linux"
+	default:
+		return ""
+	}
 }
 
 // pickWeighted selects a profile from pool using FNV-1a hash of salt modulo total weight.
 // Empty salt returns the first profile in the pool (deterministic for tests).
 func pickWeighted(pool []weightedProfile, salt string) Profile {
 	if len(pool) == 0 {
-		return profileByID(defaultProfileID("us"))
+		return profileByID(defaultProfileID())
 	}
 	if salt == "" {
 		return pool[0].profile
@@ -384,7 +388,7 @@ func profileByID(profileID string) Profile {
 	if profile, ok := catalog[profileID]; ok {
 		return profile
 	}
-	if fallback, ok := catalog[defaultProfileID("us")]; ok {
+	if fallback, ok := catalog[defaultProfileID()]; ok {
 		return fallback
 	}
 	for _, profile := range catalog {
@@ -393,24 +397,13 @@ func profileByID(profileID string) Profile {
 	return Profile{}
 }
 
-func defaultProfileID(region string) string {
-	region = NormalizeRegion(region)
-	if region == "" {
-		region = "us"
-	}
-
+func defaultProfileID() string {
 	switch runtime.GOOS {
 	case "windows":
-		if region == "ru" {
-			return ProfileChromeWinRU
-		}
 		return ProfileChromeWinUS
 	case "darwin":
 		return ProfileChromeMacUS
 	default:
-		if region == "ru" {
-			return ProfileChromeLinuxRU
-		}
 		return ProfileChromeLinuxUS
 	}
 }

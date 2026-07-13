@@ -173,7 +173,7 @@ func isZeroResultStats(s string) bool {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, "google", false)
+	ctx = core.PrepareEngineContext(ctx, query, "google")
 
 	googleURL, err := BuildURL(query)
 	if err != nil {

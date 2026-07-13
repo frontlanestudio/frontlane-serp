@@ -1,4 +1,17 @@
 async () => {
+  const readWebGL = (canvas) => {
+    try {
+      const gl = canvas ? (canvas.getContext('webgl') || canvas.getContext('experimental-webgl') || canvas.getContext('webgl2')) : null;
+      const debugInfo = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      return {
+        vendor: gl && debugInfo ? (gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '') : '',
+        renderer: gl && debugInfo ? (gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '') : '',
+      };
+    } catch (_) {
+      return { vendor: '', renderer: '' };
+    }
+  };
+  const webGL = readWebGL(document.createElement('canvas'));
   const workerData = await new Promise((resolve) => {
     try {
       const source = [
@@ -19,6 +32,7 @@ async () => {
         "platform: self.navigator.platform || '',",
         "navigatorLanguages: Array.from(self.navigator.languages || []),",
         "timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',",
+        "hardwareConcurrency: self.navigator.hardwareConcurrency || 0,",
         "webGLVendor,",
         "webGLRenderer,",
         "});",
@@ -51,11 +65,16 @@ async () => {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
     locale: Intl.DateTimeFormat().resolvedOptions().locale || "",
     webdriverType: typeof navigator.webdriver,
+    webdriverValue: navigator.webdriver === true,
     webdriverOwnPropPresent: Object.getOwnPropertyNames(navigator).includes("webdriver"),
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    workerHardwareConcurrency: workerData.hardwareConcurrency || 0,
     workerUserAgent: workerData.userAgent || "",
     workerPlatform: workerData.platform || "",
     workerNavigatorLangs: Array.from(workerData.navigatorLanguages || []),
     workerTimezone: workerData.timezone || "",
+    webGLVendor: webGL.vendor,
+    webGLRenderer: webGL.renderer,
     workerWebGLVendor: workerData.webGLVendor || "",
     workerWebGLRenderer: workerData.webGLRenderer || "",
     innerHeight: window.innerHeight || 0,

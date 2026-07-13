@@ -51,12 +51,12 @@ func TestProfileCoherence(t *testing.T) {
 		region string
 	}{
 		{
-			name:   "windows lane",
+			name:   "ru lane",
 			engine: "google",
 			region: "ru",
 		},
 		{
-			name:   "mac lane",
+			name:   "us lane",
 			engine: "bing",
 			region: "en-US",
 		},
@@ -84,7 +84,7 @@ func TestProfileCoherence(t *testing.T) {
 			}
 
 			expected := selectedProfileFromContext(t, ctx)
-			expected.UserAgent = expectedUserAgentForRuntime(expected.UserAgent, got.UserAgent)
+			expected.UserAgent = expectedUserAgentForRuntime(expectedProfileUserAgent(expected, got.UserAgent), got.UserAgent)
 			if got.UserAgent != expected.UserAgent {
 				t.Fatalf("navigator.userAgent mismatch:\nexpected: %s\nactual:   %s", expected.UserAgent, got.UserAgent)
 			}
@@ -106,11 +106,26 @@ func TestProfileCoherence(t *testing.T) {
 			if got.NavigatorLanguages[0] != expected.NavigatorLangs[0] {
 				t.Fatalf("navigator.languages[0] mismatch: expected %q got %q", expected.NavigatorLangs[0], got.NavigatorLanguages[0])
 			}
-			if got.WebdriverType != "undefined" {
-				t.Fatalf("navigator.webdriver expected undefined, got %q", got.WebdriverType)
+			// Real Chrome exposes navigator.webdriver as an inherited boolean
+			// that reads false; --disable-blink-features=AutomationControlled
+			// gives us that. Deleting the property (typeof undefined) is itself a
+			// bot tell, so we assert the genuine-browser shape instead.
+			if got.WebdriverType != "boolean" {
+				t.Fatalf("navigator.webdriver expected boolean, got %q", got.WebdriverType)
+			}
+			if got.WebdriverValue {
+				t.Fatal("navigator.webdriver should read false")
 			}
 			if got.WebdriverOwnPropPresent {
-				t.Fatal("navigator own property 'webdriver' should not be present")
+				t.Fatal("navigator.webdriver should be inherited, not an own property")
+			}
+			// hardwareConcurrency is left native (no override), so main and
+			// worker must simply agree on the machine's real core count.
+			if got.HardwareConcurrency <= 0 {
+				t.Fatal("navigator.hardwareConcurrency should be reported")
+			}
+			if got.WorkerHardwareConcurrency != got.HardwareConcurrency {
+				t.Fatalf("worker hardwareConcurrency mismatch: main %d worker %d", got.HardwareConcurrency, got.WorkerHardwareConcurrency)
 			}
 			if got.WorkerUserAgent != got.UserAgent {
 				t.Fatalf("worker userAgent mismatch: main %q worker %q", got.UserAgent, got.WorkerUserAgent)
@@ -127,11 +142,11 @@ func TestProfileCoherence(t *testing.T) {
 			if got.WorkerTimezone != got.Timezone {
 				t.Fatalf("worker timezone mismatch: main %q worker %q", got.Timezone, got.WorkerTimezone)
 			}
-			if got.WorkerWebGLVendor != expected.WebGLVendor {
-				t.Fatalf("worker WebGL vendor mismatch: expected %q got %q", expected.WebGLVendor, got.WorkerWebGLVendor)
+			if got.WorkerWebGLVendor != got.WebGLVendor {
+				t.Fatalf("worker WebGL vendor mismatch: main %q worker %q", got.WebGLVendor, got.WorkerWebGLVendor)
 			}
-			if got.WorkerWebGLRenderer != expected.WebGLRenderer {
-				t.Fatalf("worker WebGL renderer mismatch: expected %q got %q", expected.WebGLRenderer, got.WorkerWebGLRenderer)
+			if got.WorkerWebGLRenderer != got.WebGLRenderer {
+				t.Fatalf("worker WebGL renderer mismatch: main %q worker %q", got.WebGLRenderer, got.WorkerWebGLRenderer)
 			}
 			if got.InnerHeight >= got.OuterHeight {
 				t.Fatalf("innerHeight should be smaller than outerHeight, got inner=%d outer=%d", got.InnerHeight, got.OuterHeight)
@@ -139,32 +154,37 @@ func TestProfileCoherence(t *testing.T) {
 			if got.OuterHeight > got.ScreenAvailHeight {
 				t.Fatalf("outerHeight should fit in screen.availHeight, got outer=%d avail=%d", got.OuterHeight, got.ScreenAvailHeight)
 			}
-			if got.ScreenAvailHeight >= got.ScreenHeight {
-				t.Fatalf("screen.availHeight should be smaller than screen.height, got avail=%d screen=%d", got.ScreenAvailHeight, got.ScreenHeight)
+			if got.ScreenAvailHeight > got.ScreenHeight {
+				t.Fatalf("screen.availHeight should fit in screen.height, got avail=%d screen=%d", got.ScreenAvailHeight, got.ScreenHeight)
 			}
 		})
 	}
 }
 
 type profileSurface struct {
-	UserAgent               string   `json:"userAgent"`
-	Platform                string   `json:"platform"`
-	NavigatorPlatform       string   `json:"navigatorPlatform"`
-	NavigatorLanguages      []string `json:"navigatorLanguages"`
-	Timezone                string   `json:"timezone"`
-	Locale                  string   `json:"locale"`
-	WebdriverType           string   `json:"webdriverType"`
-	WebdriverOwnPropPresent bool     `json:"webdriverOwnPropPresent"`
-	WorkerUserAgent         string   `json:"workerUserAgent"`
-	WorkerPlatform          string   `json:"workerPlatform"`
-	WorkerNavigatorLangs    []string `json:"workerNavigatorLangs"`
-	WorkerTimezone          string   `json:"workerTimezone"`
-	WorkerWebGLVendor       string   `json:"workerWebGLVendor"`
-	WorkerWebGLRenderer     string   `json:"workerWebGLRenderer"`
-	InnerHeight             int      `json:"innerHeight"`
-	OuterHeight             int      `json:"outerHeight"`
-	ScreenHeight            int      `json:"screenHeight"`
-	ScreenAvailHeight       int      `json:"screenAvailHeight"`
+	UserAgent                 string   `json:"userAgent"`
+	Platform                  string   `json:"platform"`
+	NavigatorPlatform         string   `json:"navigatorPlatform"`
+	NavigatorLanguages        []string `json:"navigatorLanguages"`
+	Timezone                  string   `json:"timezone"`
+	Locale                    string   `json:"locale"`
+	WebdriverType             string   `json:"webdriverType"`
+	WebdriverValue            bool     `json:"webdriverValue"`
+	WebdriverOwnPropPresent   bool     `json:"webdriverOwnPropPresent"`
+	HardwareConcurrency       int      `json:"hardwareConcurrency"`
+	WorkerHardwareConcurrency int      `json:"workerHardwareConcurrency"`
+	WorkerUserAgent           string   `json:"workerUserAgent"`
+	WorkerPlatform            string   `json:"workerPlatform"`
+	WorkerNavigatorLangs      []string `json:"workerNavigatorLangs"`
+	WorkerTimezone            string   `json:"workerTimezone"`
+	WebGLVendor               string   `json:"webGLVendor"`
+	WebGLRenderer             string   `json:"webGLRenderer"`
+	WorkerWebGLVendor         string   `json:"workerWebGLVendor"`
+	WorkerWebGLRenderer       string   `json:"workerWebGLRenderer"`
+	InnerHeight               int      `json:"innerHeight"`
+	OuterHeight               int      `json:"outerHeight"`
+	ScreenHeight              int      `json:"screenHeight"`
+	ScreenAvailHeight         int      `json:"screenAvailHeight"`
 }
 
 func browserProfileSurface(page *rod.Page) (profileSurface, error) {
@@ -203,6 +223,25 @@ func selectedProfileFromContext(t *testing.T, ctx context.Context) browserprofil
 		t.Fatalf("selected browser profile %q not found", ids[0])
 	}
 	return profile
+}
+
+// expectedProfileUserAgent resolves the profile's user agent, expanding the
+// {chrome_major} template with the runtime's major when the profile carries a
+// template rather than a literal UA.
+func expectedProfileUserAgent(profile browserprofile.Profile, runtimeUserAgent string) string {
+	if ua := strings.TrimSpace(profile.UserAgent); ua != "" {
+		return ua
+	}
+	template := strings.TrimSpace(profile.UserAgentTemplate)
+	if template == "" {
+		return ""
+	}
+	major := chromeToken(runtimeUserAgent)
+	major = strings.TrimPrefix(major, "Chrome/")
+	if idx := strings.IndexByte(major, '.'); idx >= 0 {
+		major = major[:idx]
+	}
+	return strings.ReplaceAll(template, "{chrome_major}", major)
 }
 
 func expectedUserAgentForRuntime(profileUserAgent, runtimeUserAgent string) string {

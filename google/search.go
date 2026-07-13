@@ -228,7 +228,7 @@ func googleElementHasAdMarker(el *rod.Element) bool {
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, gogl.Name(), true)
+	ctx = core.PrepareEngineContext(ctx, query, gogl.Name())
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)
 	gogl = &scoped
@@ -494,7 +494,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Google image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.PrepareEngineContext(ctx, query, gogl.Name(), true)
+	ctx = core.PrepareEngineContext(ctx, query, gogl.Name())
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)
 	gogl = &scoped

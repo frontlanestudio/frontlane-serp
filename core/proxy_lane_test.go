@@ -103,3 +103,13 @@ func TestProxyLaneKeyIncludesTenant(t *testing.T) {
 		t.Fatalf("unexpected tenant lane id: %q", got)
 	}
 }
+
+func TestProxyLaneKeyUsesStableDirectSession(t *testing.T) {
+	key := ProxyLaneKeyForTenant("google", "tenant-a", Query{}, "")
+	if key.Empty() {
+		t.Fatal("expected a direct lane")
+	}
+	if key.SessionID != "direct" {
+		t.Fatalf("SessionID = %q, want direct", key.SessionID)
+	}
+}

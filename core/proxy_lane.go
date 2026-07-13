@@ -224,6 +224,9 @@ func ProxyLaneKeyForTenant(engine string, tenant string, q Query, proxyURL strin
 	if sessionID == "" {
 		sessionID = proxyLaneIDFromProxyURL(proxyURL)
 	}
+	if sessionID == "" {
+		sessionID = "direct"
+	}
 	return NormalizeProxyLaneKey(ProxyLaneKey{Tenant: tenant, Engine: engine, SessionID: sessionID})
 }
 

@@ -72,7 +72,7 @@ func (baid *Baidu) classifyBlockPage(page *rod.Page, url string) error {
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, baid.Name(), true)
+	ctx = core.PrepareEngineContext(ctx, query, baid.Name())
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
 	if scoped.Browser.WaitLoadTime == 0 || scoped.Browser.WaitLoadTime > 250*time.Millisecond {
@@ -170,7 +170,7 @@ func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Pag
 // SearchImage executes a Baidu image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.PrepareEngineContext(ctx, query, baid.Name(), true)
+	ctx = core.PrepareEngineContext(ctx, query, baid.Name())
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
 	baid = &scoped

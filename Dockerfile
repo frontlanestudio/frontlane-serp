@@ -12,7 +12,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /app/openserp .
 
 # `chromedp/headless-shell:stable` also works here
-FROM chromedp/headless-shell:stable@sha256:aac539266027f91cf47610da1129dce360d23f45f8f150683cca94223fa2f1e2
+FROM chromedp/headless-shell:stable@sha256:f7e7ac721b023cb8717f8108aef8b3e49995fb1e5a912f41e570c29e45d24961
 
 WORKDIR /usr/src/app
 

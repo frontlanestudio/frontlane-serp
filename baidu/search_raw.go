@@ -19,7 +19,7 @@ func classifyBaiduRawHTML(body []byte) error {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.PrepareEngineContext(ctx, query, "baidu", false)
+	ctx = core.PrepareEngineContext(ctx, query, "baidu")
 
 	searchURL, err := BuildURL(query)
 	if err != nil {

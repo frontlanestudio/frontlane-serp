@@ -2,13 +2,13 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -30,7 +30,7 @@ type BrowserOpts struct {
 	IsLeakless bool
 	// Timeout is applied to browser connect and page navigation operations.
 	Timeout time.Duration
-	// LanguageCode sets Accept-Language for emulated requests.
+	// LanguageCode selects the regional browser lane and search locale.
 	LanguageCode string
 	// WaitRequests waits for request-idle state after navigation.
 	WaitRequests bool
@@ -279,20 +279,17 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		return nil, err
 	}
 
-	// Create launcher.
-	// headless=new uses the full Chrome renderer; legacy --headless disables the
-	// GPU process entirely, making WebGL context creation fail even with SwiftShader.
-	// use-angle=swiftshader-webgl (Chrome ≥112) enables a software WebGL renderer.
-	// Rod enables leakless by default, so always pass the configured value
-	// through. OpenSERP defaults it to false because the helper binary is
-	// commonly flagged by antivirus on Windows.
+	// headless=new keeps the full renderer, so WebGL falls back to SwiftShader
+	// when there's no GPU - which is what the swiftshader profiles describe.
+	// Legacy --headless kills the GPU process and breaks WebGL entirely.
+	// Leakless defaults to false: the helper binary trips antivirus on Windows.
 	l := launcher.New().Leakless(opts.IsLeakless).
+		Set("lang", browserLaunchLanguage(opts)).
 		Set("disable-blink-features", "AutomationControlled").
-		Delete("enable-automation").
-		Set("use-angle", "swiftshader-webgl").
-		Set("ignore-gpu-blocklist")
+		Delete("enable-automation")
 	if opts.IsHeadless {
-		l = l.HeadlessNew(true)
+		// Initial window only; per-page setDeviceMetricsOverride is what pages see. Sized for the 1920x1080 swiftshader profiles that run on Docker.
+		l = l.HeadlessNew(true).Set("window-size", "1920,1040")
 	} else {
 		l = l.Headless(false)
 	}
@@ -363,6 +360,12 @@ func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
 		"block_trackers":          opts.BlockTrackers,
 		"proxy_lanes_enabled":     opts.ProxyLaneStore != nil,
 	}
+}
+
+func browserLaunchLanguage(_ BrowserOpts) string {
+	// Speech voices are per-process and CDP can't change them, so pin the
+	// launch locale to the catalog rather than the request hint.
+	return "en-US"
 }
 
 func maskedProxyLogValue(proxyURL string) string {
@@ -653,7 +656,6 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 		profile, ok := browserprofile.ProfileByID(forcedID)
 		if ok {
 			profile = applyRuntimeBrowserVersion(profile, browser)
-			profile = applyProfileLanguageHint(profile, region)
 			if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
 				profile.UserAgent = overrideUA
 			}
@@ -663,9 +665,8 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 
 	if laneKey := proxyLaneKeyFromContext(ctx); !laneKey.Empty() && b.ProxyLaneStore != nil {
 		profile := b.ProxyLaneStore.Profile(laneKey, func() browserprofile.Profile {
-			selected := browserprofile.SelectProfileForSession(engine, region, laneKey.SessionID)
+			selected := browserprofile.SelectProfileForSessionHeadless(engine, region, laneKey.SessionID, b.IsHeadless)
 			selected = applyRuntimeBrowserVersion(selected, browser)
-			selected = applyProfileLanguageHint(selected, region)
 			if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
 				selected.UserAgent = overrideUA
 			}
@@ -691,9 +692,8 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 	// RWMutex-guarded catalog, and applyRuntimeBrowserVersion makes a CDP
 	// round-trip (browser.Version). Holding state.mu over network I/O would
 	// serialize all concurrent Navigate calls.
-	profile := browserprofile.SelectProfileForSession(engine, region, laneKey)
+	profile := browserprofile.SelectProfileForSessionHeadless(engine, region, laneKey, b.IsHeadless)
 	profile = applyRuntimeBrowserVersion(profile, browser)
-	profile = applyProfileLanguageHint(profile, region)
 	if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
 		profile.UserAgent = overrideUA
 	}
@@ -712,17 +712,46 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 	return profile, laneKey
 }
 
+// removeChromeBrand drops the "Google Chrome" client-hint brand from a profile,
+// used when the launched binary is Chromium rather than Google Chrome.
+func removeChromeBrand(profile browserprofile.Profile) browserprofile.Profile {
+	profile.UACHBrands = removeBrand(profile.UACHBrands, "google chrome")
+	profile.UACHFullVerList = removeBrand(profile.UACHFullVerList, "google chrome")
+	return profile
+}
+
+func removeBrand(values []browserprofile.BrandVersion, unwanted string) []browserprofile.BrandVersion {
+	out := make([]browserprofile.BrandVersion, 0, len(values))
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value.Brand), unwanted) {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
 func applyRuntimeBrowserVersion(profile browserprofile.Profile, browser *rod.Browser) browserprofile.Profile {
 	fullVersion := ""
+	product := ""
 	if browser != nil {
 		version, err := browser.Version()
 		if err == nil && version != nil {
+			product = strings.TrimSpace(version.Product)
 			fullVersion = extractChromeVersion(version.UserAgent)
 			if fullVersion == "" {
-				fullVersion = extractChromeVersion(version.Product)
+				fullVersion = extractChromeVersion(product)
 			}
 		}
 	}
+
+	// version.Product tells us the real binary: "Chrome/..." for genuine Chrome,
+	// "Chromium/..." or "HeadlessChrome/..." otherwise. On non-Chrome builds we
+	// drop the "Google Chrome" UA-CH brand so the hints match the binary.
+	return applyRuntimeBrowserVersionValues(profile, product, fullVersion)
+}
+
+func applyRuntimeBrowserVersionValues(profile browserprofile.Profile, product, fullVersion string) browserprofile.Profile {
 	if fullVersion == "" {
 		fullVersion = extractChromeVersion(profile.UserAgent)
 	}
@@ -735,10 +764,37 @@ func applyRuntimeBrowserVersion(profile browserprofile.Profile, browser *rod.Bro
 		return profile
 	}
 
-	profile.UserAgent = replaceChromeUserAgentVersion(profile.UserAgent, major+".0.0.0")
-	profile.UACHBrands = patchBrandVersions(profile.UACHBrands, major, false)
-	profile.UACHFullVerList = patchBrandVersions(profile.UACHFullVerList, fullVersion, true)
+	if template := strings.TrimSpace(profile.UserAgentTemplate); template != "" {
+		profile.UserAgent = strings.ReplaceAll(template, "{chrome_major}", major)
+	} else {
+		profile.UserAgent = replaceChromeUserAgentVersion(profile.UserAgent, major+".0.0.0")
+	}
+	if len(profile.UACHBrands) == 0 {
+		profile.UACHBrands = runtimeUACHBrands(major, false)
+	} else {
+		profile.UACHBrands = patchBrandVersions(profile.UACHBrands, major, false)
+	}
+	if len(profile.UACHFullVerList) == 0 {
+		profile.UACHFullVerList = runtimeUACHBrands(fullVersion, true)
+	} else {
+		profile.UACHFullVerList = patchBrandVersions(profile.UACHFullVerList, fullVersion, true)
+	}
+	if product != "" && !strings.HasPrefix(product, "Chrome/") {
+		profile = removeChromeBrand(profile)
+	}
 	return profile
+}
+
+func runtimeUACHBrands(version string, full bool) []browserprofile.BrandVersion {
+	notABrandVersion := "24"
+	if full {
+		notABrandVersion = "24.0.0.0"
+	}
+	return []browserprofile.BrandVersion{
+		{Brand: "Not_A Brand", Version: notABrandVersion},
+		{Brand: "Chromium", Version: version},
+		{Brand: "Google Chrome", Version: version},
+	}
 }
 
 func extractChromeVersion(value string) string {
@@ -808,9 +864,6 @@ type profileDisplayMetrics struct {
 	ViewportHeight int
 	ScreenWidth    int
 	ScreenHeight   int
-	AvailWidth     int
-	AvailHeight    int
-	AvailTop       int
 	OuterWidth     int
 	OuterHeight    int
 	PositionX      int
@@ -849,9 +902,6 @@ func profileDisplayMetricsFor(profile browserprofile.Profile) profileDisplayMetr
 		ViewportHeight: viewportHeight,
 		ScreenWidth:    screenWidth,
 		ScreenHeight:   screenHeight,
-		AvailWidth:     screenWidth,
-		AvailHeight:    availHeight,
-		AvailTop:       availTop,
 		OuterWidth:     screenWidth,
 		OuterHeight:    availHeight,
 		PositionX:      0,
@@ -897,12 +947,12 @@ func applyProfileLanguageHint(profile browserprofile.Profile, langCode string) b
 	return profile
 }
 
-func applyProfile(page *rod.Page, profile browserprofile.Profile, minimal bool) error {
+func applyProfile(page *rod.Page, profile browserprofile.Profile, headless bool) error {
 	if page == nil {
 		return fmt.Errorf("page is nil")
 	}
 
-	navigatorLangs := profileNavigatorLanguages(profile)
+	navigatorLangs := profileNavigatorLanguagesForRuntime(profile, runtime.GOOS, headless)
 	acceptLanguage := strings.TrimSpace(profile.AcceptLanguage)
 	if acceptLanguage == "" {
 		acceptLanguage = navigatorLangs[0]
@@ -913,6 +963,18 @@ func applyProfile(page *rod.Page, profile browserprofile.Profile, minimal bool) 
 	}
 
 	metrics := profileDisplayMetricsFor(profile)
+	// setWindowBounds can close the target under headless, and there's no real
+	// window anyway - setDeviceMetricsOverride below covers those dimensions.
+	if !headless {
+		if err := page.SetWindow(&proto.BrowserBounds{
+			Left:   &metrics.PositionX,
+			Top:    &metrics.PositionY,
+			Width:  &metrics.OuterWidth,
+			Height: &metrics.OuterHeight,
+		}); err != nil {
+			logrus.WithError(err).Debug("set browser window unsupported")
+		}
+	}
 
 	metadata := &proto.EmulationUserAgentMetadata{
 		Brands:          toProtoBrandVersions(profile.UACHBrands),
@@ -924,9 +986,11 @@ func applyProfile(page *rod.Page, profile browserprofile.Profile, minimal bool) 
 		Mobile:          profile.Mobile,
 	}
 
+	// This only seeds navigator.languages (Chrome strips q-values), so it's the
+	// plain tag list. The wire header with q-weights is set below.
 	if err := (proto.NetworkSetUserAgentOverride{
 		UserAgent:         strings.TrimSpace(profile.UserAgent),
-		AcceptLanguage:    acceptLanguage,
+		AcceptLanguage:    strings.Join(navigatorLangs, ","),
 		Platform:          navigatorPlatformForProfile(profile),
 		UserAgentMetadata: metadata,
 	}).Call(page); err != nil {
@@ -958,20 +1022,20 @@ func applyProfile(page *rod.Page, profile browserprofile.Profile, minimal bool) 
 		return fmt.Errorf("set device metrics failed: %w", err)
 	}
 
+	if err := (proto.EmulationSetEmulatedMedia{Features: []*proto.EmulationMediaFeature{
+		{Name: "prefers-reduced-motion", Value: "no-preference"},
+		{Name: "prefers-color-scheme", Value: "light"},
+		{Name: "forced-colors", Value: "none"},
+	}}).Call(page); err != nil {
+		return fmt.Errorf("set emulated media failed: %w", err)
+	}
+
 	if err := (proto.NetworkSetExtraHTTPHeaders{
 		Headers: proto.NetworkHeaders{
 			"Accept-Language": gson.New(acceptLanguage),
 		},
 	}).Call(page); err != nil {
 		return fmt.Errorf("set extra headers failed: %w", err)
-	}
-
-	if minimal {
-		return nil
-	}
-
-	if err := evalPatchScript(page, profile, navigatorLangs, metrics); err != nil {
-		return err
 	}
 
 	return nil
@@ -1023,14 +1087,7 @@ type networkUsageWatcher struct {
 	done   chan struct{}
 }
 
-type workerPatchWatcher struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-	page   *rod.Page
-}
-
 var pageNetworkUsageWatchers sync.Map
-var pageWorkerPatchWatchers sync.Map
 
 func startMainDocumentStatusWatcher(ctx context.Context, page *rod.Page) *mainDocumentStatusWatcher {
 	watchCtx, cancel := context.WithCancel(EnsureContext(ctx))
@@ -1098,107 +1155,11 @@ func startNetworkUsageWatcher(ctx context.Context, page *rod.Page) *networkUsage
 	return watcher
 }
 
-func startWorkerPatchWatcher(ctx context.Context, page *rod.Page, script string) (*workerPatchWatcher, error) {
-	if page == nil || strings.TrimSpace(script) == "" {
-		return nil, nil
-	}
-
-	watchCtx, cancel := context.WithCancel(EnsureContext(ctx))
-	watcher := &workerPatchWatcher{
-		cancel: cancel,
-		done:   make(chan struct{}),
-		page:   page,
-	}
-
-	scopedPage := page.Context(watchCtx)
-	started := make(chan struct{})
-	go func() {
-		defer close(watcher.done)
-		wait := scopedPage.EachEvent(func(e *proto.TargetAttachedToTarget) bool {
-			if e == nil || e.SessionID == "" {
-				return false
-			}
-			go injectWorkerPatch(watchCtx, scopedPage.Browser(), e, script)
-			return false
-		})
-		close(started)
-		wait()
-	}()
-
-	<-started
-	if err := (proto.TargetSetAutoAttach{
-		AutoAttach:             true,
-		WaitForDebuggerOnStart: true,
-		Flatten:                true,
-		Filter:                 workerTargetFilter(),
-	}).Call(scopedPage); err != nil {
-		cancel()
-		<-watcher.done
-		return nil, fmt.Errorf("enable worker auto-attach: %w", err)
-	}
-
-	return watcher, nil
-}
-
-func workerTargetFilter() proto.TargetTargetFilter {
-	return proto.TargetTargetFilter{
-		{Type: "worker"},
-		{Type: string(proto.TargetTargetInfoTypeSharedWorker)},
-		{Type: string(proto.TargetTargetInfoTypeServiceWorker)},
-	}
-}
-
-func injectWorkerPatch(ctx context.Context, browser *rod.Browser, e *proto.TargetAttachedToTarget, script string) {
-	if browser == nil || e == nil || e.SessionID == "" {
-		return
-	}
-
-	injectCtx, cancel := context.WithTimeout(EnsureContext(ctx), 3*time.Second)
-	defer cancel()
-
-	if isPatchableWorkerTarget(e.TargetInfo) {
-		eval := proto.RuntimeEvaluate{
-			Expression:                  script,
-			Silent:                      true,
-			AllowUnsafeEvalBlockedByCSP: true,
-		}
-		if _, err := browser.Call(injectCtx, string(e.SessionID), eval.ProtoReq(), eval); err != nil && !errors.Is(err, context.Canceled) {
-			logrus.WithError(err).Debug("Worker profile patch failed")
-		}
-	}
-
-	if e.WaitingForDebugger {
-		run := proto.RuntimeRunIfWaitingForDebugger{}
-		if _, err := browser.Call(injectCtx, string(e.SessionID), run.ProtoReq(), run); err != nil && !errors.Is(err, context.Canceled) {
-			logrus.WithError(err).Debug("Resume worker after profile patch failed")
-		}
-	}
-}
-
-func isPatchableWorkerTarget(info *proto.TargetTargetInfo) bool {
-	if info == nil {
-		return true
-	}
-	switch string(info.Type) {
-	case "worker", string(proto.TargetTargetInfoTypeSharedWorker), string(proto.TargetTargetInfoTypeServiceWorker):
-		return true
-	default:
-		return false
-	}
-}
-
 func rememberNetworkUsageWatcher(page *rod.Page, watcher *networkUsageWatcher) {
 	if page == nil || watcher == nil {
 		return
 	}
 	pageNetworkUsageWatchers.Store(page, watcher)
-}
-
-func rememberWorkerPatchWatcher(page *rod.Page, watcher *workerPatchWatcher) {
-	if page == nil || watcher == nil {
-		return
-	}
-	pageWorkerPatchWatchers.Store(page, watcher)
 }
 
 func stopNetworkUsageWatcher(page *rod.Page) {
@@ -1214,43 +1175,9 @@ func stopNetworkUsageWatcher(page *rod.Page) {
 	}
 }
 
-func stopWorkerPatchWatcher(page *rod.Page) {
-	if page == nil {
-		return
-	}
-	raw, ok := pageWorkerPatchWatchers.LoadAndDelete(page)
-	if !ok {
-		return
-	}
-	if watcher, ok := raw.(*workerPatchWatcher); ok {
-		watcher.Stop()
-	}
-}
-
 func (w *networkUsageWatcher) Stop() {
 	if w == nil {
 		return
-	}
-	w.cancel()
-	select {
-	case <-w.done:
-	case <-time.After(100 * time.Millisecond):
-	}
-}
-
-func (w *workerPatchWatcher) Stop() {
-	if w == nil {
-		return
-	}
-	if w.page != nil {
-		disableCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_ = (proto.TargetSetAutoAttach{
-			AutoAttach:             false,
-			WaitForDebuggerOnStart: false,
-			Flatten:                true,
-			Filter:                 workerTargetFilter(),
-		}).Call(w.page.Context(disableCtx))
-		cancel()
 	}
 	w.cancel()
 	select {
@@ -1281,21 +1208,22 @@ func classifyMainDocumentStatus(status int) error {
 
 func profileNavigatorLanguages(profile browserprofile.Profile) []string {
 	langs := make([]string, 0, len(profile.NavigatorLangs))
+	seen := make(map[string]struct{}, len(profile.NavigatorLangs))
 	for _, language := range profile.NavigatorLangs {
 		trimmed := strings.TrimSpace(language)
 		if trimmed == "" {
 			continue
 		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
 		langs = append(langs, trimmed)
-	}
-	if len(langs) > 0 {
-		return langs
 	}
 
 	acceptLanguage := strings.TrimSpace(profile.AcceptLanguage)
 	if acceptLanguage != "" {
 		parts := strings.Split(acceptLanguage, ",")
-		langs = make([]string, 0, len(parts))
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if part == "" {
@@ -1305,18 +1233,31 @@ func profileNavigatorLanguages(profile browserprofile.Profile) []string {
 				part = strings.TrimSpace(part[:idx])
 			}
 			if part != "" {
+				if _, ok := seen[part]; ok {
+					continue
+				}
+				seen[part] = struct{}{}
 				langs = append(langs, part)
 			}
 		}
-		if len(langs) > 0 {
-			return langs
-		}
+	}
+	if len(langs) > 0 {
+		return langs
 	}
 
 	if locale := strings.TrimSpace(profile.Locale); locale != "" {
 		return []string{locale}
 	}
 	return []string{"en-US"}
+}
+
+func profileNavigatorLanguagesForRuntime(profile browserprofile.Profile, goos string, headless bool) []string {
+	langs := profileNavigatorLanguages(profile)
+	// Linux headless-shell keeps workers at the process locale only.
+	if headless && goos == "linux" {
+		return langs[:1]
+	}
+	return langs
 }
 
 func toProtoBrandVersions(values []browserprofile.BrandVersion) []*proto.EmulationUserAgentBrandVersion {
@@ -1333,60 +1274,6 @@ func toProtoBrandVersions(values []browserprofile.BrandVersion) []*proto.Emulati
 		})
 	}
 	return out
-}
-
-func buildProfilePatchScript(profile browserprofile.Profile, langs []string, metrics profileDisplayMetrics) (string, error) {
-	langsJSON, err := json.Marshal(langs)
-	if err != nil {
-		return "", fmt.Errorf("marshal navigator languages: %w", err)
-	}
-
-	webGLVendor := strings.TrimSpace(profile.WebGLVendor)
-	if webGLVendor == "" {
-		webGLVendor = "Intel Inc."
-	}
-	webGLRenderer := strings.TrimSpace(profile.WebGLRenderer)
-	if webGLRenderer == "" {
-		webGLRenderer = "Intel Iris OpenGL Engine"
-	}
-
-	webGLVendorJSON, err := json.Marshal(webGLVendor)
-	if err != nil {
-		return "", fmt.Errorf("marshal webgl vendor: %w", err)
-	}
-	webGLRendererJSON, err := json.Marshal(webGLRenderer)
-	if err != nil {
-		return "", fmt.Errorf("marshal webgl renderer: %w", err)
-	}
-
-	return fmt.Sprintf("(() => {\nconst __langs = %s;\nconst __w = %d;\nconst __h = %d;\nconst __screenW = %d;\nconst __screenH = %d;\nconst __availW = %d;\nconst __availH = %d;\nconst __availTop = %d;\nconst __outerW = %d;\nconst __outerH = %d;\nconst __webglVendor = %s;\nconst __webglRenderer = %s;\n%s\n})();",
-		string(langsJSON),
-		metrics.ViewportWidth,
-		metrics.ViewportHeight,
-		metrics.ScreenWidth,
-		metrics.ScreenHeight,
-		metrics.AvailWidth,
-		metrics.AvailHeight,
-		metrics.AvailTop,
-		metrics.OuterWidth,
-		metrics.OuterHeight,
-		string(webGLVendorJSON),
-		string(webGLRendererJSON),
-		string(browserprofile.PatchJS),
-	), nil
-}
-
-func evalPatchScript(page *rod.Page, profile browserprofile.Profile, langs []string, metrics profileDisplayMetrics) error {
-	script, err := buildProfilePatchScript(profile, langs, metrics)
-	if err != nil {
-		return err
-	}
-
-	_, err = page.EvalOnNewDocument(script)
-	if err != nil {
-		return fmt.Errorf("eval patch script: %w", err)
-	}
-	return nil
 }
 
 // Navigate connects to Chromium, creates a page, applies a coherent profile and
@@ -1437,7 +1324,6 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	// context first causes Chrome to kill the page target before our Close call,
 	// producing a spurious "target closed" error on the page.Close() that follows.
 	closeOnErr := func() {
-		stopWorkerPatchWatcher(page)
 		stopNetworkUsageWatcher(page)
 		if cerr := page.Close(); cerr != nil && !isBrowserClosedError(cerr) {
 			WithRequest(ctx).WithError(cerr).Debug("Close page after navigate error failed")
@@ -1450,7 +1336,6 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	// background watchers attached to it must still stop or they leak goroutines.
 	stopWatchersOnErr := func() {
 		if b.LeavePageOpen {
-			stopWorkerPatchWatcher(page)
 			stopNetworkUsageWatcher(page)
 		} else {
 			closeOnErr()
@@ -1459,12 +1344,10 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 
 	profile, laneKey := b.laneProfile(ctx, browser)
 	SetBrowserProfileID(ctx, profile.ID)
-	minimalProfile := minimalBrowserProfileFromContext(ctx)
 	WithRequest(ctx).WithFields(logrus.Fields{
-		"lane_id":         laneKey,
-		"minimal_profile": minimalProfile,
+		"lane_id": laneKey,
 	}).Info("Browser profile selected")
-	if err := applyProfile(page, profile, minimalProfile); err != nil {
+	if err := applyProfile(page, profile, b.IsHeadless); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("apply profile %s (%s) failed: %w", profile.ID, laneKey, err)
 	}
@@ -1474,20 +1357,6 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	page = page.Context(ctx)
-	if !minimalProfile {
-		metrics := profileDisplayMetricsFor(profile)
-		patchScript, err := buildProfilePatchScript(profile, profileNavigatorLanguages(profile), metrics)
-		if err != nil {
-			closeOnErr()
-			return nil, err
-		}
-		workerPatchWatcher, err := startWorkerPatchWatcher(ctx, page, patchScript)
-		if err != nil {
-			closeOnErr()
-			return nil, err
-		}
-		rememberWorkerPatchWatcher(page, workerPatchWatcher)
-	}
 	if err := b.configureRequestBlocking(ctx, page); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("configure request blocking failed: %w", err)
@@ -1603,7 +1472,6 @@ func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 	if page == nil {
 		return nil
 	}
-	stopWorkerPatchWatcher(page)
 	stopNetworkUsageWatcher(page)
 	if timeout <= 0 {
 		timeout = time.Second
