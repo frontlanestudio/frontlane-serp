@@ -420,6 +420,8 @@ paths:
               $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
+            X-Fallback-Engine:
+              $ref: "#/components/headers/XFallbackEngine"
             X-Proxy-Mode:
               $ref: "#/components/headers/XProxyMode"
             X-Proxy-Tag:
@@ -547,6 +549,35 @@ paths:
           $ref: "#/components/responses/BadRequestError"
         "502":
           $ref: "#/components/responses/BadGatewayError"
+
+  /extract/batch:
+    post:
+      tags: [Extract]
+      operationId: extractBatch
+      summary: Extract content from multiple URLs (WebUI-compatible)
+      description: >
+        Accepts an array of URLs and returns extracted page content in the
+        format expected by Open WebUI's ExternalWebLoader. Each result
+        contains `page_content` (markdown) and `metadata` (title, source,
+        lang, etc.).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchExtractRequest"
+      responses:
+        "200":
+          description: Batch extraction results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BatchExtractItem"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
   /health:
     get:
       tags: [Health]
@@ -2037,3 +2068,31 @@ components:
             $ref: "#/components/schemas/MegaEngineInfo"
         total:
           type: integer
+
+    # ── Batch extract (WebUI) ────────────────────────────────────────
+    BatchExtractRequest:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+          maxItems: 20
+          description: URLs to extract content from (max 20)
+        mode:
+          type: string
+          enum: [auto, fast, rendered]
+          description: Extraction mode (default: auto)
+
+    BatchExtractItem:
+      type: object
+      properties:
+        page_content:
+          type: string
+          description: Extracted markdown content
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Page metadata (title, source, lang, etc.)
