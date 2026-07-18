@@ -420,8 +420,6 @@ paths:
               $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
-            X-Fallback-Engine:
-              $ref: "#/components/headers/XFallbackEngine"
             X-Proxy-Mode:
               $ref: "#/components/headers/XProxyMode"
             X-Proxy-Tag:
@@ -554,12 +552,11 @@ paths:
     post:
       tags: [Extract]
       operationId: extractBatch
-      summary: Extract content from multiple URLs (WebUI-compatible)
+      summary: Extract content from multiple URLs
       description: >
-        Accepts an array of URLs and returns extracted page content in the
-        format expected by Open WebUI's ExternalWebLoader. Each result
-        contains `page_content` (markdown) and `metadata` (title, source,
-        lang, etc.).
+        Accepts an array of URLs and returns extracted page content for each
+        one. Each result contains `page_content` (markdown) and `metadata`
+        (title, source, lang, etc.).
       requestBody:
         required: true
         content:
@@ -2069,7 +2066,7 @@ components:
         total:
           type: integer
 
-    # ── Batch extract (WebUI) ────────────────────────────────────────
+    # ── Batch extract ─────────────────────────────────────────────────
     BatchExtractRequest:
       type: object
       required: [urls]

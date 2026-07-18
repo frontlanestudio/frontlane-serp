@@ -426,14 +426,14 @@ type batchExtractPayload struct {
 	Mode string   `json:"mode"`
 }
 
-// batchExtractItem is the WebUI-compatible response item per URL.
+// batchExtractItem is a response item for a single extracted URL, using
+// page_content/metadata keys
 type batchExtractItem struct {
 	PageContent string            `json:"page_content"`
 	Metadata    map[string]string `json:"metadata"`
 }
 
 func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
-	startedAt := time.Now()
 	requestCtx := withRequestUsage(c.UserContext(), "extract-batch")
 	c.SetUserContext(requestCtx)
 	defer setNetworkBytesHeader(c, requestCtx)
@@ -545,6 +545,5 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 	}
 	wg.Wait()
 
-	_ = startedAt
 	return c.JSON(results)
 }

@@ -113,7 +113,7 @@ func TestValidateExtractTargetURLNormalizesBarePublicIP(t *testing.T) {
 	}
 }
 
-func TestBatchExtractReturnsWebUIFormat(t *testing.T) {
+func TestBatchExtractSingleURL(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`<html><body><article><h1>Test Page</h1><p>This is a test page with enough content to pass the minimum runes threshold for extraction in batch mode.</p></article></body></html>`))
