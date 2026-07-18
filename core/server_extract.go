@@ -446,10 +446,10 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 
 	var body batchExtractPayload
 	if len(c.Body()) == 0 {
-		return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_request", Message: "request body is required"}
+		return errInvalidParam("request body is required")
 	}
 	if err := c.BodyParser(&body); err != nil {
-		return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_request", Message: "invalid JSON body"}
+		return errInvalidParam("invalid JSON body")
 	}
 
 	// Deduplicate and normalize URLs.
@@ -467,14 +467,10 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 		urls = append(urls, u)
 	}
 	if len(urls) == 0 {
-		return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_request", Message: "urls array is required and must contain at least one valid URL"}
+		return errInvalidParam("urls array is required and must contain at least one valid URL")
 	}
 	if len(urls) > maxBatchExtractURLs {
-		return &APIError{
-			HTTPStatus: fiber.StatusBadRequest,
-			ErrorCode:  "invalid_request",
-			Message:    fmt.Sprintf("urls array exceeds maximum of %d", maxBatchExtractURLs),
-		}
+		return errInvalidParam(fmt.Sprintf("urls array exceeds maximum of %d", maxBatchExtractURLs))
 	}
 
 	// Validate all URLs upfront.
@@ -539,6 +535,7 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 					"canonical":   result.Canonical,
 					"mode_used":   result.Meta.ModeUsed,
 					"fetched_at":  result.Meta.FetchedAt,
+					"took_ms":     fmt.Sprintf("%d", result.Meta.TookMs),
 				},
 			}
 		}(i, u)
