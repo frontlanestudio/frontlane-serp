@@ -2080,7 +2080,7 @@ components:
         mode:
           type: string
           enum: [auto, fast, rendered]
-          description: Extraction mode (default: auto)
+          description: "Extraction mode (default: auto)"
 
     BatchExtractItem:
       type: object
