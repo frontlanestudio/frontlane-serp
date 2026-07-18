@@ -418,3 +418,129 @@ func SanitizeExtractError(err error) string {
 	}
 	return msg
 }
+
+const maxBatchExtractURLs = 20
+
+type batchExtractPayload struct {
+	URLs []string `json:"urls"`
+	Mode string   `json:"mode"`
+}
+
+// batchExtractItem is a response item for a single extracted URL, using
+// page_content/metadata keys
+type batchExtractItem struct {
+	PageContent string            `json:"page_content"`
+	Metadata    map[string]string `json:"metadata"`
+}
+
+func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
+	requestCtx := withRequestUsage(c.UserContext(), "extract-batch")
+	c.SetUserContext(requestCtx)
+	defer setNetworkBytesHeader(c, requestCtx)
+	defer setBrowserProfileHeader(c, requestCtx)
+
+	cfg := s.opts.Extract.Normalized()
+	if !cfg.Enabled {
+		return &APIError{HTTPStatus: fiber.StatusNotFound, ErrorCode: "not_found", Message: "Extraction is disabled"}
+	}
+
+	var body batchExtractPayload
+	if len(c.Body()) == 0 {
+		return errInvalidParam("request body is required")
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return errInvalidParam("invalid JSON body")
+	}
+
+	// Deduplicate and normalize URLs.
+	seen := make(map[string]struct{}, len(body.URLs))
+	var urls []string
+	for _, raw := range body.URLs {
+		u := extractpkg.NormalizeURL(strings.TrimSpace(raw))
+		if u == "" {
+			continue
+		}
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		urls = append(urls, u)
+	}
+	if len(urls) == 0 {
+		return errInvalidParam("urls array is required and must contain at least one valid URL")
+	}
+	if len(urls) > maxBatchExtractURLs {
+		return errInvalidParam(fmt.Sprintf("urls array exceeds maximum of %d", maxBatchExtractURLs))
+	}
+
+	// Validate all URLs upfront.
+	for _, u := range urls {
+		if err := validateExtractTargetURL(c.UserContext(), u, cfg.AllowPrivateNetworks); err != nil {
+			return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_extract_url", Message: err.Error()}
+		}
+	}
+
+	mode := firstNonEmpty(body.Mode, cfg.DefaultMode)
+	extractor := s.newExtractor()
+	results := make([]batchExtractItem, len(urls))
+
+	// Concurrent extraction with bounded parallelism (same pattern as
+	// EnrichEnvelopeWithExtraction).
+	ctx, cancel := context.WithTimeout(c.UserContext(), cfg.BatchTimeout(len(urls)))
+	defer cancel()
+
+	sem := make(chan struct{}, cfg.MaxConcurrent)
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, url string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := ctx.Err(); err != nil {
+				results[idx] = batchExtractItem{
+					PageContent: "",
+					Metadata:    map[string]string{"source": url, "error": "batch timeout"},
+				}
+				return
+			}
+
+			req := extractpkg.ExtractRequest{
+				URL:      url,
+				Mode:     extractpkg.Mode(mode),
+				ProxyURL: "",
+				LangCode: strings.TrimSpace(c.Query("lang")),
+				Timeout:  cfg.Timeout,
+				MaxBytes: cfg.MaxBytes,
+			}
+			result, err := extractor.Extract(ctx, req)
+			if err != nil {
+				results[idx] = batchExtractItem{
+					PageContent: "",
+					Metadata: map[string]string{
+						"source": url,
+						"error":  SanitizeExtractError(err),
+					},
+				}
+				return
+			}
+			results[idx] = batchExtractItem{
+				PageContent: result.Markdown,
+				Metadata: map[string]string{
+					"source":      url,
+					"title":       result.Title,
+					"description": result.Description,
+					"lang":        result.Lang,
+					"canonical":   result.Canonical,
+					"mode_used":   result.Meta.ModeUsed,
+					"fetched_at":  result.Meta.FetchedAt,
+					"took_ms":     fmt.Sprintf("%d", result.Meta.TookMs),
+				},
+			}
+		}(i, u)
+	}
+	wg.Wait()
+
+	return c.JSON(results)
+}

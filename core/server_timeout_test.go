@@ -12,8 +12,8 @@ import (
 )
 
 // FP-2: every endpoint that doesn't manage its own deadline budget must get
-// one from RequestTimeoutMiddleware; /mega/* (MegaTimeout) and /extract
-// (batch budget) keep theirs.
+// one from RequestTimeoutMiddleware; /mega/* (MegaTimeout) and /extract,
+// /extract/batch (batch budget) keep theirs.
 func TestRequestTimeoutMiddlewareSetsDeadlineExceptBudgetedPaths(t *testing.T) {
 	app := fiber.New()
 	app.Use(RequestTimeoutMiddleware(time.Minute))
@@ -32,12 +32,14 @@ func TestRequestTimeoutMiddlewareSetsDeadlineExceptBudgetedPaths(t *testing.T) {
 	app.Post("/google/parse", record("/google/parse"))
 	app.Get("/mega/search", record("/mega/search"))
 	app.Get("/extract", record("/extract"))
+	app.Post("/extract/batch", record("/extract/batch"))
 
 	for path, method := range map[string]string{
 		"/google/search": http.MethodGet,
 		"/google/parse":  http.MethodPost,
 		"/mega/search":   http.MethodGet,
 		"/extract":       http.MethodGet,
+		"/extract/batch": http.MethodPost,
 	} {
 		req := httptest.NewRequest(method, path, nil)
 		resp, err := app.Test(req, -1)
@@ -54,6 +56,7 @@ func TestRequestTimeoutMiddlewareSetsDeadlineExceptBudgetedPaths(t *testing.T) {
 		"/google/parse":  true,
 		"/mega/search":   false,
 		"/extract":       false,
+		"/extract/batch": false,
 	} {
 		if deadlines[path] != want {
 			t.Errorf("%s: deadline attached = %v, want %v", path, deadlines[path], want)
