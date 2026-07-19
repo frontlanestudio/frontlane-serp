@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,61 +115,48 @@ func TestValidateExtractTargetURLNormalizesBarePublicIP(t *testing.T) {
 
 func TestBatchExtractSingleURL(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`<html><body><article><h1>Test Page</h1><p>This is a test page with enough content to pass the minimum runes threshold for extraction in batch mode.</p></article></body></html>`))
 	}))
 	defer target.Close()
 
-	opts := DefaultServerOptions()
-	opts.Extract = extractpkg.Config{
-		Enabled:              true,
-		DefaultMode:          string(extractpkg.ModeFast),
-		Timeout:              time.Second,
-		MaxBytes:             256 * 1024,
-		MaxConcurrent:        2,
-		AllowPrivateNetworks: true,
-	}
-	s := NewServerWithOptions("127.0.0.1", 0, opts)
-
-	body := fmt.Sprintf(`{"urls":["%s"]}`, target.URL)
-	req, err := http.NewRequest(http.MethodPost, "/extract/batch", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.app.Test(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, fmt.Sprintf(`{"urls":["%s"]}`, target.URL))
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-
-	var results []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		t.Fatalf("decode response: %v", err)
+	items := decodeBatchItems(t, resp)
+	if len(items) != 1 {
+		t.Fatalf("items count = %d, want 1", len(items))
 	}
-	if len(results) != 1 {
-		t.Fatalf("results count = %d, want 1", len(results))
+	if items[0].PageContent == "" {
+		t.Fatal("expected non-empty page_content")
 	}
-	if _, ok := results[0]["page_content"]; !ok {
-		t.Fatalf("expected page_content key, got keys: %v", reflect.ValueOf(results[0]).MapKeys())
-	}
-	if _, ok := results[0]["metadata"]; !ok {
-		t.Fatalf("expected metadata key, got keys: %v", reflect.ValueOf(results[0]).MapKeys())
+	if items[0].Metadata["title"] != "Test Page" {
+		t.Fatalf("metadata = %v, want title 'Test Page'", items[0].Metadata)
 	}
 }
 
 func TestBatchExtractHandlesMultipleURLs(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`<html><body><article><h1>Multi</h1><p>Page with sufficient content for batch extraction test that verifies concurrent processing works correctly.</p></article></body></html>`))
 	}))
 	defer target.Close()
 
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, fmt.Sprintf(`{"urls":["%s/1","%s/2","%s/3"]}`, target.URL, target.URL, target.URL))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if items := decodeBatchItems(t, resp); len(items) != 3 {
+		t.Fatalf("items count = %d, want 3", len(items))
+	}
+}
+
+func batchExtractTestServer(allowPrivate bool) *Server {
 	opts := DefaultServerOptions()
 	opts.Extract = extractpkg.Config{
 		Enabled:              true,
@@ -177,51 +164,163 @@ func TestBatchExtractHandlesMultipleURLs(t *testing.T) {
 		Timeout:              time.Second,
 		MaxBytes:             256 * 1024,
 		MaxConcurrent:        2,
-		AllowPrivateNetworks: true,
+		AllowPrivateNetworks: allowPrivate,
 	}
-	s := NewServerWithOptions("127.0.0.1", 0, opts)
+	return NewServerWithOptions("127.0.0.1", 0, opts)
+}
 
-	body := fmt.Sprintf(`{"urls":["%s/1","%s/2","%s/3"]}`, target.URL, target.URL, target.URL)
+func postBatchExtract(t *testing.T, s *Server, body string, header ...[2]string) *http.Response {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, "/extract/batch", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-
+	for _, h := range header {
+		req.Header.Set(h[0], h[1])
+	}
 	resp, err := s.app.Test(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return resp
+}
+
+func decodeBatchItems(t *testing.T, resp *http.Response) []batchExtractItem {
+	t.Helper()
+	var items []batchExtractItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return items
+}
+
+func TestBatchExtractReturnsPerURLErrors(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><article><h1>Good page</h1><p>Enough body text to extract something meaningful from this page in batch mode.</p></article></body></html>`))
+	}))
+	defer target.Close()
+
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, fmt.Sprintf(`{"urls":["%s","ftp://example.com/x"]}`, target.URL))
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-
-	var results []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		t.Fatalf("decode response: %v", err)
+	items := decodeBatchItems(t, resp)
+	if len(items) != 2 {
+		t.Fatalf("items count = %d, want 2", len(items))
 	}
-	if len(results) != 3 {
-		t.Fatalf("results count = %d, want 3", len(results))
+	if !strings.Contains(items[0].PageContent, "Good page") || items[0].Metadata["error"] != "" {
+		t.Fatalf("first item = %+v, want successful extraction", items[0])
+	}
+	if items[1].PageContent != "" || items[1].Metadata["error"] == "" {
+		t.Fatalf("second item = %+v, want error item", items[1])
+	}
+	if items[1].Metadata["source"] != "ftp://example.com/x" {
+		t.Fatalf("second item source = %q", items[1].Metadata["source"])
+	}
+}
+
+func TestBatchExtractKeepsPrivateNetworkGuardPerItem(t *testing.T) {
+	s := batchExtractTestServer(false)
+	resp := postBatchExtract(t, s, `{"urls":["http://169.254.169.254/latest/meta-data/"]}`)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	items := decodeBatchItems(t, resp)
+	if len(items) != 1 {
+		t.Fatalf("items count = %d, want 1", len(items))
+	}
+	if items[0].PageContent != "" || !strings.Contains(items[0].Metadata["error"], "not allowed") {
+		t.Fatalf("item = %+v, want blocked-target error", items[0])
+	}
+}
+
+func TestBatchExtractDedupesURLs(t *testing.T) {
+	var hits int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`<html><body><article><h1>Dedup</h1><p>Some body text long enough for the extractor to produce markdown content here.</p></article></body></html>`))
+	}))
+	defer target.Close()
+
+	s := batchExtractTestServer(true)
+	body := fmt.Sprintf(`{"urls":["%s/a","%s/a","%s/b"]}`, target.URL, target.URL, target.URL)
+	resp := postBatchExtract(t, s, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if items := decodeBatchItems(t, resp); len(items) != 2 {
+		t.Fatalf("items count = %d, want 2", len(items))
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("target hits = %d, want 2", got)
+	}
+}
+
+func TestBatchExtractDisabledReturns404(t *testing.T) {
+	opts := DefaultServerOptions()
+	opts.Extract = extractpkg.DefaultConfig()
+	opts.Extract.Enabled = false
+	s := NewServerWithOptions("127.0.0.1", 0, opts)
+
+	resp := postBatchExtract(t, s, `{"urls":["https://example.com"]}`)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestBatchExtractRejectsInvalidMode(t *testing.T) {
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, `{"urls":["https://example.com"],"mode":"turbo"}`)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestBatchExtractRejectsBadProxyHeader(t *testing.T) {
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, `{"urls":["https://example.com"]}`, [2]string{"X-Proxy-URL", "not-a-proxy"})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestBatchExtractBodyLangReachesFetch(t *testing.T) {
+	var acceptLanguage string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acceptLanguage = r.Header.Get("Accept-Language")
+		_, _ = w.Write([]byte(`<html><body><article><h1>Lang</h1><p>Body text long enough to satisfy extraction thresholds for this test case.</p></article></body></html>`))
+	}))
+	defer target.Close()
+
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, fmt.Sprintf(`{"urls":["%s"],"lang":"de"}`, target.URL))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if !strings.HasPrefix(acceptLanguage, "de") {
+		t.Fatalf("Accept-Language = %q, want de-prefixed", acceptLanguage)
 	}
 }
 
 func TestBatchExtractRejectsEmptyURLs(t *testing.T) {
-	opts := DefaultServerOptions()
-	opts.Extract = extractpkg.DefaultConfig()
-	s := NewServerWithOptions("127.0.0.1", 0, opts)
-
-	req, err := http.NewRequest(http.MethodPost, "/extract/batch", strings.NewReader(`{"urls":[]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.app.Test(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, `{"urls":[]}`)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -230,27 +329,15 @@ func TestBatchExtractRejectsEmptyURLs(t *testing.T) {
 }
 
 func TestBatchExtractRejectsURLsOverLimit(t *testing.T) {
-	opts := DefaultServerOptions()
-	opts.Extract = extractpkg.DefaultConfig()
-	s := NewServerWithOptions("127.0.0.1", 0, opts)
-
-	// Build 21 URLs (limit is 20)
+	// 21 URLs, limit is 20
 	urls := make([]string, 21)
-	for i := 0; i < 21; i++ {
+	for i := range urls {
 		urls[i] = fmt.Sprintf("https://example.com/%d", i)
 	}
 	body, _ := json.Marshal(map[string][]string{"urls": urls})
 
-	req, err := http.NewRequest(http.MethodPost, "/extract/batch", strings.NewReader(string(body)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.app.Test(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := batchExtractTestServer(true)
+	resp := postBatchExtract(t, s, string(body))
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {

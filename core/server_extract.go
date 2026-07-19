@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,9 +21,10 @@ type extractPayload struct {
 	Mode string `json:"mode"`
 	// Clean defaults to true (article-only). Pointer so we can tell "omitted"
 	// (use default) from an explicit false (full-page extraction).
-	Clean      *bool `json:"clean"`
-	UseLLMSTxt bool  `json:"use_llms_txt"`
-	MinRunes   int   `json:"min_runes"`
+	Clean      *bool  `json:"clean"`
+	UseLLMSTxt bool   `json:"use_llms_txt"`
+	MinRunes   int    `json:"min_runes"`
+	Lang       string `json:"lang"`
 }
 
 func (s *Server) handleExtract(c *fiber.Ctx) error {
@@ -57,11 +59,10 @@ func (s *Server) handleExtract(c *fiber.Ctx) error {
 	return sendExtractResult(c, format, result)
 }
 
-func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (extractpkg.ExtractRequest, error) {
-	var body extractPayload
-	if len(c.Body()) > 0 {
-		_ = c.BodyParser(&body)
-	}
+// baseExtractRequest builds the URL-independent part of an extract request
+// from proxy headers, query params, and the parsed body. Shared by /extract
+// and /extract/batch so both accept the same knobs.
+func (s *Server) baseExtractRequest(c *fiber.Ctx, body extractPayload, cfg extractpkg.Config) (extractpkg.ExtractRequest, error) {
 	proxyOverride, err := NormalizeProxyRequestOverride(c.Get("X-Use-Proxy"))
 	if err != nil {
 		return extractpkg.ExtractRequest{}, errInvalidParam(fmt.Sprintf("X-Use-Proxy: %v", err))
@@ -78,7 +79,12 @@ func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (e
 	if err := s.validateRequestProxyURL(&q); err != nil {
 		return extractpkg.ExtractRequest{}, err
 	}
-	mode := firstNonEmpty(c.Query("mode"), body.Mode, cfg.DefaultMode)
+	mode := extractpkg.Mode(strings.ToLower(firstNonEmpty(c.Query("mode"), body.Mode, cfg.DefaultMode)))
+	switch mode {
+	case extractpkg.ModeAuto, extractpkg.ModeFast, extractpkg.ModeRendered:
+	default:
+		return extractpkg.ExtractRequest{}, errInvalidParam("mode must be one of auto, fast, rendered")
+	}
 	// Default clean=true (article-only). FullPage is the inverse: full-readable-body
 	// extraction, opted in via clean=false on the query string or body.
 	bodyClean := true
@@ -90,21 +96,32 @@ func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (e
 	if err != nil {
 		return extractpkg.ExtractRequest{}, errInvalidParam("min_runes must be a non-negative integer")
 	}
-	targetURL := extractpkg.NormalizeURL(strings.TrimSpace(firstNonEmpty(c.Query("url"), body.URL)))
-	if err := validateExtractTargetURL(c.UserContext(), targetURL, cfg.AllowPrivateNetworks); err != nil {
-		return extractpkg.ExtractRequest{}, errInvalidParam(err.Error())
-	}
 	return extractpkg.ExtractRequest{
-		URL:        targetURL,
-		Mode:       extractpkg.Mode(mode),
+		Mode:       mode,
 		ProxyURL:   proxyURL,
-		LangCode:   strings.TrimSpace(c.Query("lang")),
+		LangCode:   firstNonEmpty(body.Lang, c.Query("lang")),
 		Timeout:    cfg.Timeout,
 		MaxBytes:   cfg.MaxBytes,
 		FullPage:   !clean,
 		UseLLMSTxt: parseBoolDefault(c.Query("use_llms_txt"), body.UseLLMSTxt),
 		MinRunes:   minRunes,
 	}, nil
+}
+
+func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (extractpkg.ExtractRequest, error) {
+	var body extractPayload
+	if len(c.Body()) > 0 {
+		_ = c.BodyParser(&body)
+	}
+	req, err := s.baseExtractRequest(c, body, cfg)
+	if err != nil {
+		return extractpkg.ExtractRequest{}, err
+	}
+	req.URL = extractpkg.NormalizeURL(strings.TrimSpace(firstNonEmpty(c.Query("url"), body.URL)))
+	if err := validateExtractTargetURL(c.UserContext(), req.URL, cfg.AllowPrivateNetworks); err != nil {
+		return extractpkg.ExtractRequest{}, errInvalidParam(err.Error())
+	}
+	return req, nil
 }
 
 func (s *Server) newExtractor() extractpkg.Extractor {
@@ -422,12 +439,13 @@ func SanitizeExtractError(err error) string {
 const maxBatchExtractURLs = 20
 
 type batchExtractPayload struct {
+	extractPayload
 	URLs []string `json:"urls"`
-	Mode string   `json:"mode"`
 }
 
-// batchExtractItem is a response item for a single extracted URL, using
-// page_content/metadata keys
+// batchExtractItem is one entry of the bare-array /extract/batch response.
+// The {page_content, metadata} shape is the Open WebUI ExternalWebLoader
+// contract - do not wrap it in the Envelope.
 type batchExtractItem struct {
 	PageContent string            `json:"page_content"`
 	Metadata    map[string]string `json:"metadata"`
@@ -444,49 +462,34 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 		return &APIError{HTTPStatus: fiber.StatusNotFound, ErrorCode: "not_found", Message: "Extraction is disabled"}
 	}
 
-	var body batchExtractPayload
 	if len(c.Body()) == 0 {
 		return errInvalidParam("request body is required")
 	}
+	var body batchExtractPayload
 	if err := c.BodyParser(&body); err != nil {
 		return errInvalidParam("invalid JSON body")
 	}
-
-	// Deduplicate and normalize URLs.
-	seen := make(map[string]struct{}, len(body.URLs))
-	var urls []string
-	for _, raw := range body.URLs {
-		u := extractpkg.NormalizeURL(strings.TrimSpace(raw))
-		if u == "" {
-			continue
-		}
-		if _, dup := seen[u]; dup {
-			continue
-		}
-		seen[u] = struct{}{}
-		urls = append(urls, u)
-	}
+	urls := dedupeBatchURLs(body.URLs)
 	if len(urls) == 0 {
 		return errInvalidParam("urls array is required and must contain at least one valid URL")
 	}
 	if len(urls) > maxBatchExtractURLs {
 		return errInvalidParam(fmt.Sprintf("urls array exceeds maximum of %d", maxBatchExtractURLs))
 	}
-
-	// Validate all URLs upfront.
-	for _, u := range urls {
-		if err := validateExtractTargetURL(c.UserContext(), u, cfg.AllowPrivateNetworks); err != nil {
-			return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_extract_url", Message: err.Error()}
-		}
+	baseReq, err := s.baseExtractRequest(c, body.extractPayload, cfg)
+	if err != nil {
+		return err
 	}
 
-	mode := firstNonEmpty(body.Mode, cfg.DefaultMode)
+	// Target URLs are validated in the fetch path, inside the workers - a bad
+	// URL becomes an error item instead of failing the whole batch (Open WebUI
+	// drops every doc on a non-2xx). 400 is reserved for malformed requests.
 	extractor := s.newExtractor()
 	results := make([]batchExtractItem, len(urls))
 
-	// Concurrent extraction with bounded parallelism (same pattern as
-	// EnrichEnvelopeWithExtraction).
-	ctx, cancel := context.WithTimeout(c.UserContext(), cfg.BatchTimeout(len(urls)))
+	// Bounded parallelism plus an aggregate deadline, same pattern as
+	// EnrichEnvelopeWithExtraction.
+	ctx, cancel := context.WithTimeout(requestCtx, cfg.BatchTimeout(len(urls)))
 	defer cancel()
 
 	sem := make(chan struct{}, cfg.MaxConcurrent)
@@ -497,50 +500,58 @@ func (s *Server) handleBatchExtract(c *fiber.Ctx) error {
 		go func(idx int, url string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			if err := ctx.Err(); err != nil {
-				results[idx] = batchExtractItem{
-					PageContent: "",
-					Metadata:    map[string]string{"source": url, "error": "batch timeout"},
-				}
-				return
-			}
-
-			req := extractpkg.ExtractRequest{
-				URL:      url,
-				Mode:     extractpkg.Mode(mode),
-				ProxyURL: "",
-				LangCode: strings.TrimSpace(c.Query("lang")),
-				Timeout:  cfg.Timeout,
-				MaxBytes: cfg.MaxBytes,
-			}
-			result, err := extractor.Extract(ctx, req)
-			if err != nil {
-				results[idx] = batchExtractItem{
-					PageContent: "",
-					Metadata: map[string]string{
-						"source": url,
-						"error":  SanitizeExtractError(err),
-					},
-				}
-				return
-			}
-			results[idx] = batchExtractItem{
-				PageContent: result.Markdown,
-				Metadata: map[string]string{
-					"source":      url,
-					"title":       result.Title,
-					"description": result.Description,
-					"lang":        result.Lang,
-					"canonical":   result.Canonical,
-					"mode_used":   result.Meta.ModeUsed,
-					"fetched_at":  result.Meta.FetchedAt,
-					"took_ms":     fmt.Sprintf("%d", result.Meta.TookMs),
-				},
-			}
+			results[idx] = batchExtractOne(ctx, extractor, baseReq, url)
 		}(i, u)
 	}
 	wg.Wait()
 
 	return c.JSON(results)
+}
+
+// dedupeBatchURLs normalizes, drops empties, and keeps first occurrence order.
+func dedupeBatchURLs(raw []string) []string {
+	seen := make(map[string]struct{}, len(raw))
+	var urls []string
+	for _, r := range raw {
+		u := extractpkg.NormalizeURL(strings.TrimSpace(r))
+		if u == "" {
+			continue
+		}
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		urls = append(urls, u)
+	}
+	return urls
+}
+
+// batchExtractOne extracts a single URL, folding failures into the item.
+func batchExtractOne(ctx context.Context, extractor extractpkg.Extractor, req extractpkg.ExtractRequest, url string) batchExtractItem {
+	fail := func(err error) batchExtractItem {
+		WithRequest(ctx).WithError(err).WithField("url", url).Warn("Batch extract failed")
+		return batchExtractItem{Metadata: map[string]string{"source": url, "error": SanitizeExtractError(err)}}
+	}
+	// Skip the fetch once the batch budget is spent.
+	if ctx.Err() != nil {
+		return fail(errors.New("batch timeout"))
+	}
+	req.URL = url
+	result, err := extractor.Extract(ctx, req)
+	if err != nil {
+		return fail(err)
+	}
+	return batchExtractItem{
+		PageContent: result.Markdown,
+		Metadata: map[string]string{
+			"source":      url,
+			"title":       result.Title,
+			"description": result.Description,
+			"lang":        result.Lang,
+			"canonical":   result.Canonical,
+			"mode_used":   result.Meta.ModeUsed,
+			"fetched_at":  result.Meta.FetchedAt,
+			"took_ms":     strconv.FormatInt(result.Meta.TookMs, 10),
+		},
+	}
 }

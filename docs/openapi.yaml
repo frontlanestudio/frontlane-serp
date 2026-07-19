@@ -536,6 +536,11 @@ paths:
                     extracted-text runes than this, escalate to a browser render.
                     `0` (default) uses the built-in floor. Ignored in `fast` and
                     `rendered` modes.
+                lang:
+                  type: string
+                  description: >
+                    Language hint sent as `Accept-Language` on the target fetch.
+                    The `lang` query parameter works as a fallback.
       responses:
         "200":
           description: Extracted URL content
@@ -550,13 +555,19 @@ paths:
 
   /extract/batch:
     post:
-      tags: [Extract]
+      tags: [Search]
       operationId: extractBatch
       summary: Extract content from multiple URLs
       description: >
-        Accepts an array of URLs and returns extracted page content for each
-        one. Each result contains `page_content` (markdown) and `metadata`
-        (title, source, lang, etc.).
+        Accepts up to 20 URLs (deduplicated) and returns a bare JSON array of
+        `{page_content, metadata}` items - the shape Open WebUI's external web
+        loader expects. A URL that fails validation or extraction yields an
+        item with `metadata.error` and an empty `page_content` instead of
+        failing the batch. `400` is reserved for malformed requests: empty or
+        oversized `urls`, unknown `mode`, invalid proxy headers.
+      parameters:
+        - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
       requestBody:
         required: true
         content:
@@ -565,7 +576,7 @@ paths:
               $ref: "#/components/schemas/BatchExtractRequest"
       responses:
         "200":
-          description: Batch extraction results
+          description: Batch extraction results, one item per unique URL
           content:
             application/json:
               schema:
@@ -2076,20 +2087,44 @@ components:
           items:
             type: string
           maxItems: 20
-          description: URLs to extract content from (max 20)
+          description: URLs to extract content from (max 20 after deduplication)
         mode:
           type: string
           enum: [auto, fast, rendered]
-          description: "Extraction mode (default: auto)"
+          default: auto
+          description: Extraction mode
+        clean:
+          type: boolean
+          default: true
+          description: >
+            Article-only extraction (default). Set `false` for
+            whole-readable-body extraction.
+        use_llms_txt:
+          type: boolean
+          default: false
+          description: >
+            Probe `/llms-full.txt` then `/llms.txt` for site-root URLs and use
+            that markdown instead of scraping HTML.
+        min_runes:
+          type: integer
+          minimum: 0
+          description: Auto-mode escalation floor, same semantics as `/extract`
+        lang:
+          type: string
+          description: >
+            Language hint sent as `Accept-Language` on target fetches. The
+            `lang` query parameter works as a fallback.
 
     BatchExtractItem:
       type: object
       properties:
         page_content:
           type: string
-          description: Extracted markdown content
+          description: Extracted markdown content, empty when the item failed
         metadata:
           type: object
           additionalProperties:
             type: string
-          description: Page metadata (title, source, lang, etc.)
+          description: >
+            Page metadata (source, title, lang, canonical, mode_used, etc.).
+            Failed items carry only `source` and `error`.

@@ -2,30 +2,28 @@
 
 # OpenSERP
 
-[![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/karust/openserp.svg)](https://pkg.go.dev/github.com/karust/openserp)
 [![release](https://img.shields.io/github/v/release/karust/openserp)](https://github.com/karust/openserp/releases)
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/r/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
+[![Telegram](https://img.shields.io/badge/Telegram-openserp__cloud-26A5E4?logo=telegram&logoColor=white)](https://t.me/openserp_cloud)
 
-**OpenSERP** is a free, open-source SERP API and CLI for live search data from **Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia**.
+**OpenSERP** is a free, open-source SERP API and CLI for Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia.
 
-Use it as a search tool for **LLMs, agents, and RAG pipelines**, or as a scraper backend for **SEO rank tracking across Google, Yandex, Baidu, and more**. It is especially useful when your workflow needs RU/CN web coverage instead of another Google-only API.
+No API keys, no per-search billing: one command gives you live, structured search results on localhost - including engines the paid APIs don't cover. Use it as a search tool for LLMs and agents, or as a backend for SEO rank tracking. If you'd rather not run infrastructure, there is a [hosted version](https://openserp.org/cloud) with the same API.
 
-Run it locally, self-host it, or use the [cloud version](https://openserp.org/cloud) when you want the same public API shape without operating the server. Cloud is also the simplest way to support OpenSERP: it is where the technology gets tested at scale, and that work flows straight back into this open-source project.
+![OpenSERP CLI demo](./docs/demo.gif)
 
 ## Features
 
-- 🔍 **Multi-engine** - dedicated endpoints for Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia, with stable JSON for SEO rank pipelines
-- 🌐 **Megasearch** - `/mega/search` runs one query across every selected engine, then merges and dedupes results
-- 📄 **URL extraction** - return search results plus clean markdown/text target-page content in one call, for grounding and automation
-- ✨ **SERP features** - AI summaries, answer boxes, people-also-ask, and related searches in a response
-- 🖼 **Images** - image search is also available
-- 🎯 **Advanced filters** - language, date range, file type, and site queries
-- 📝 **Data formats** - JSON, Markdown, Text, NdJSON response formats
-- 🌍 **Configurable** - proxy, cache, and resilient mode
-- 🐳 **Docker-ready** - local and container deployment
+- Dedicated endpoints for six engines, same JSON schema across all of them
+- **Megasearch** - one query across several engines at once, merged and deduped
+- **URL extraction** - search results plus clean markdown of the target pages in one call
+- SERP features: AI summaries, answer boxes, people-also-ask, related searches
+- Image search, filters (language, date range, file type, site), **JSON/Markdown/Text/NdJSON** output
+- Proxies, cache, resilient mode, prebuilt Docker images
 
-## ⚡ Quick Start
+## Quick Start
 
 ### Docker
 
@@ -58,6 +56,7 @@ go build -o openserp .
 ### First request
 
 ```sh
+# mode=any returns the first engine that responds
 curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&extract=1&mode=any"
 ```
 
@@ -86,7 +85,7 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
       "title": "The Go Programming Language",
       "url": "https://go.dev/",
       "display_url": "go.dev",
-      "snippet": "Get Started Playground Tour Stack Overflow Help Packages Standard Library About Go Packages About Download Blog Issue Tracker Release Notes Brand Guidelines Code of Conduct Connect …",
+      "snippet": "Get Started Playground Tour Stack Overflow Help Packages Standard Library …",
       "domain": "go.dev",
       "favicon": "https://go.dev/favicon.ico",
       "position": {
@@ -101,7 +100,7 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
       "extracted": {
         "title": "Build simple, secure, scalable systems with Go",
         "format": "markdown",
-        "content": "## Build simple, secure, scalable systems with Go\n\n![Go Gopher climbing a ladder.](https://go.dev/images/gophers/ladder.svg)\n\n- “At the time, no single team member knew Go, but **within a month, everyone was writing in Go** and we were building out the endpoints. It was the flexibility, how easy it was to use, and the really cool concept behind Go (how Go handles native concurrency, garbage collection, and of course safety+speed.) that helped engage us during the build. Also, who can beat that cute mascot!”\n ........",
+        "content": "## Build simple, secure, scalable systems with Go\n\n![Go Gopher climbing a ladder.](https://go.dev/images/gophers/ladder.svg)\n\n- “At the time, no single team member knew Go, but **within a month, everyone was writing in Go** and we were building out the endpoints. ........",
         "mode_used": "fast",
         "fetched_at": "2026-06-16T00:06:56Z"
       }
@@ -113,7 +112,7 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
       "title": "Go (programming language) - Wikipedia",
       "url": "https://en.wikipedia.org/wiki/Go_(programming_language)",
       "display_url": "en.wikipedia.org › wiki › Go_(programming_language)",
-      "snippet": "In Go's package system, each package has a path (e.g., \"compress/bzip2\" or \"golang.org/x/net/html\") and a name (e.g., bzip2 or html). By default other packages' definitions must always be prefixed with …",
+      "snippet": "In Go's package system, each package has a path (e.g., \"compress/bzip2\" or \"golang.org/x/net/html\") and a name (e.g., bzip2 or html). …",
       "domain": "en.wikipedia.org",
       "favicon": "https://en.wikipedia.org/favicon.ico",
       "position": {
@@ -162,24 +161,6 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
 
 </details>
 
-## Deployment Options
-
-- **Self-hosted (this repo)** - free, MIT-licensed, with full control over runtime, proxies, cache, and scaling.
-- **[OpenSERP Cloud](https://openserp.org/cloud)** - the same public API, run and maintained for you by the people who build OpenSERP.
-
-Same endpoints, same response schema, and client code migrates either direction, so you are never locked in.
-
-If OpenSERP is useful to you and you would rather not run the infrastructure yourself, using Cloud (or topping up an account) is a direct way to support the project. It is where the technology gets exercised against real traffic at scale, which is how the engines get hardened, new features get tested, and the open-source core keeps improving. Every request you send through Cloud helps fund and shape what lands back in this repository.
-
-## API Docs
-
-Once the server is running, the interactive docs are available locally:
-
-- Swagger UI: `http://127.0.0.1:7000/docs`
-- OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
-
-To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
-
 ## SDKs & Examples
 
 Official client packages. Each works against your self-hosted server (set `baseUrl`) or the [hosted API](https://openserp.org/cloud) (set `apiKey`):
@@ -222,6 +203,8 @@ Megasearch:
 ```bash
 curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
 ```
+
+`/mega/search` returns the same envelope as engine endpoints plus `clusters`: results are deduplicated by normalized URL, and clusters keep the per-engine occurrences and ranks.
 
 | Mode       | Best for                             | Behavior                                       |
 | ---------- | ------------------------------------ | ---------------------------------------------- |
@@ -266,43 +249,57 @@ curl "http://127.0.0.1:7000/extract?url=https://example.com&mode=auto"
 # Return clean page markdown
 curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
 
+# Extract several URLs at once - returns a bare [{page_content, metadata}] array
+# (Open WebUI external loader compatible); failed URLs become items with metadata.error
+curl -X POST "http://127.0.0.1:7000/extract/batch" \
+  -H "Content-Type: application/json" \
+  -d '{"urls":["https://example.com","https://go.dev"],"mode":"fast"}'
+
 # Embed extracted content under the top search results
 curl "http://127.0.0.1:7000/google/search?text=llm+observability&extract=2&format=markdown"
 ```
 
-## 🖥 CLI Search
+## CLI Search
 
 No server required - query an engine straight from the terminal. The CLI shares the same engines, formats, and filters as the API.
 
 ```sh
-openserp search duckduckgo "free open source serp" --format markdown
+openserp search ecosia "weather in london" --format markdown
 ```
 
 <details>
 <summary>CLI output and more examples</summary>
 
 ```markdown
-# Search results for "free open source serp"
+# Search results for "weather in london"
 
-**Query:** free open source serp - **Engines:** duckduckgo - **Took:** 1794ms
+**Query:** weather in london - **Engines:** ecosia - **Took:** 866ms
 
 ## Results
 
-### 1. OpenSERP: Open-Source, Self-Hosted & Free SERP API
+### 1. London - BBC Weather
 
-**openserp.org** - organic
+**bbc.com › weather › 2643743** - organic
 
-OpenSERP is a free, open-source and self-hosted SERP API for Google, Bing, Yandex, Baidu, DuckDuckGo and Ecosia, with an optional managed Cloud path.
+Latest forecast for London ... Tonight will continue dry, and there will be mainly clear skies. Just a few patches of cloud drifting in from the north at times.
 
--> https://openserp.org/
+-> https://www.bbc.com/weather/2643743
 
-### 2. GitHub - karust/openserp: Open-source SERP API for AI, SEO & automation ...
+### 2. London (Greater London) weather - Met Office
 
-**github.com › karust › openserp** - organic
+**weather.metoffice.gov.uk › forecast › gcpvj0v07** - organic
 
-OpenSERP is a free, open-source API and CLI for accessing normalized search engine results from Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia. Run it locally, self-host it, or use the optional hosted API when you do not want to manage infrastructure.
+Remaining warm with light winds and dry. Possibly cloudy at times Monday and Tuesday, then Wednesday sunnier conditions are likely.
 
--> https://github.com/karust/openserp
+-> https://weather.metoffice.gov.uk/forecast/gcpvj0v07
+
+### 3. London, London, United Kingdom Weather Forecast
+
+**accuweather.com › en › gb › london › ec4a-2 › wea…** - organic
+
+London, London, United Kingdom Weather Forecast, with current conditions, wind, air quality, and what to expect for the next 3 days.
+
+-> https://www.accuweather.com/en/gb/london/ec4a-2/weather-forecast/328328
 ```
 
 More CLI examples:
@@ -321,14 +318,15 @@ openserp search bing "release notes" --site github.com --format ndjson
 openserp search google "llm observability" --extract 2 --format markdown
 
 # Browserless (raw HTTP) mode through a proxy
-openserp search duckduckgo "free open source serp" --raw --proxy http://user:pass@127.0.0.1:8080
+# (raw mode: google, yandex, baidu, ecosia)
+openserp search ecosia "weather in london" --raw --proxy http://user:pass@127.0.0.1:8080
 ```
 
 </details>
 
 Run `openserp search --help` for the full flag list. Engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
 
-## 🔍 Query Parameters
+## Query Parameters
 
 Common parameters:
 
@@ -353,132 +351,7 @@ Engine-specific parameters:
 | `filter`   | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
 | `features` | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.     |
 
-## Search Response Example
-
-<details>
-<summary>Search response example</summary>
-
-```json
-{
-  "query": {
-    "text": "golang",
-    "engines_requested": ["google"]
-  },
-  "meta": {
-    "request_id": "019dc6c1-da45-706e-a57c-d671fa2862ee",
-    "requested_at": "2026-04-25T22:27:52Z",
-    "took_ms": 6410,
-    "engines_failed": [],
-    "version": "2.1"
-  },
-  "results": [
-    {
-      "id": "s_78341aa47c336101",
-      "rank": 1,
-      "type": "organic",
-      "title": "Documentation - The Go Programming Language",
-      "url": "https://go.dev/doc/",
-      "display_url": "go.dev > doc",
-      "snippet": "Official Go documentation, tutorials, references, and release notes.",
-      "domain": "go.dev",
-      "favicon": "https://go.dev/favicon.ico",
-      "position": {
-        "absolute": 1
-      },
-      "engine": "google",
-      "domain_info": {
-        "tld": "dev",
-        "sld": "go",
-        "category": ""
-      }
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "has_more": true,
-    "next_start": 25
-  }
-}
-```
-
-</details>
-
-## Mega Response Notes
-
-`/mega/search` returns the same envelope plus `clusters`. Results are deduplicated by normalized URL; clusters keep the per-engine occurrences.
-
-<details>
-<summary>Cluster example</summary>
-
-```json
-{
-  "id": "c_a1b2c3d4e5f6a1b2",
-  "canonical_url": "https://go.dev/",
-  "domain": "go.dev",
-  "title": "The Go Programming Language",
-  "occurrences": [
-    { "engine": "google", "rank": 1, "result_id": "s_78341aa47c336101" },
-    { "engine": "bing", "rank": 2, "result_id": "s_20f9f15f0c3d9f6d" }
-  ],
-  "engines_count": 2,
-  "best_rank": 1,
-  "score": 0.75
-}
-```
-
-</details>
-
-## Image Response Example
-
-<details>
-<summary>Image result example</summary>
-
-```json
-{
-  "id": "i_a1b2c3d4e5f6a1b2",
-  "rank": 1,
-  "type": "image",
-  "title": "Go Gopher Logo",
-  "image": {
-    "url": "https://example.com/images/go-logo.png",
-    "thumbnail": "https://example.com/images/go-logo-thumb.png",
-    "width": 1200,
-    "height": 800
-  },
-  "source": {
-    "page_url": "https://go.dev/brand/",
-    "domain": "go.dev"
-  },
-  "engine": "bing"
-}
-```
-
-</details>
-
-## Error Responses
-
-`400 Bad Request`:
-
-```json
-{
-  "error": "bad_request",
-  "code": 400,
-  "message": "EMPTY_QUERY: query cannot be empty: provide text, site, or file parameter",
-  "reason": "EMPTY_QUERY"
-}
-```
-
-`503 Service Unavailable`:
-
-```json
-{
-  "error": "service_unavailable",
-  "code": 503,
-  "message": "captcha found, please stop sending requests for a while: captcha detected"
-}
-```
-
-## 🌍 Proxy Support
+## Proxy Support
 
 OpenSERP supports HTTP and SOCKS5 proxies.
 
@@ -491,18 +364,21 @@ Simple global proxy:
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
 
-A [managed API](https://openserp.org/cloud) is also available for teams that do not want to operate infrastructure.
+## API Docs
 
-## Health & Stats
+Once the server is running, the interactive docs are available locally:
 
-```bash
-curl -i "http://127.0.0.1:7000/health"
-curl "http://127.0.0.1:7000/ready"
-curl "http://127.0.0.1:7000/stats"
-curl "http://127.0.0.1:7000/stats/cache"
-curl "http://127.0.0.1:7000/stats/proxy"
-curl "http://127.0.0.1:7000/stats/cb"
-```
+- Swagger UI: `http://127.0.0.1:7000/docs` - full schemas, error shapes, and the `/health`, `/ready`, `/stats/*` endpoints
+- OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
+
+To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
+
+## Self-Hosted or Cloud
+
+- **Self-hosted (this repo)** - free, MIT-licensed, full control over runtime, proxies, cache, and scaling.
+- **[OpenSERP Cloud](https://openserp.org/cloud)** - same endpoints and response schema, no infrastructure to run.
+
+Client code migrates in either direction, so you are never locked in.
 
 ## License
 
@@ -516,6 +392,6 @@ Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
 - [GitHub Issues](https://github.com/karust/openserp/issues) - bugs, feature ideas, and reproducible issues.
 - [feedback@openserp.org](mailto:feedback@openserp.org) - private notes, longer feedback, or anything that does not fit GitHub Issues.
-- [Telegram Channel](https://t.me/+RJEKspw3mUlhZDMy) - OpenSERP news, release notes, and project updates.
+- [Telegram](https://t.me/openserp_cloud) - OpenSERP news, release notes, and project updates.
 
 > OpenSERP is free and open-source. Only links listed in this repository and on [openserp.org](https://openserp.org) are associated with the project.
