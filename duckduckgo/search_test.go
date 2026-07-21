@@ -1,10 +1,14 @@
 package duckduckgo
 
 import (
+	"context"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/karust/openserp/core"
+	"github.com/karust/openserp/testutil"
+	"github.com/karust/openserp/testutil/ithelper"
 )
 
 func TestBuildURL(t *testing.T) {
@@ -257,67 +261,51 @@ func TestDuckDuckGoLanguageMapping(t *testing.T) {
 	}
 }
 
-func TestShouldFetchDuckDuckGoPage(t *testing.T) {
-	results := func(organic, ads int) []core.SearchResult {
-		out := make([]core.SearchResult, 0, organic+ads)
-		for i := 0; i < ads; i++ {
-			out = append(out, core.SearchResult{URL: "https://ad.example/" + string(rune('a'+i)), Ad: true})
-		}
-		for i := 0; i < organic; i++ {
-			out = append(out, core.SearchResult{URL: "https://example.com/" + string(rune('a'+i))})
-		}
-		return out
+func TestWindowOrganicResults(t *testing.T) {
+	results := []core.SearchResult{
+		{URL: "https://ad.example", Ad: true},
+		{URL: "https://example.com/1", Rank: 1},
+		{URL: "https://example.com/2", Rank: 2},
+		{URL: "https://example.com/3", Rank: 3},
+		{URL: "https://example.com/4", Rank: 4},
 	}
 
-	tests := []struct {
-		name         string
-		results      []core.SearchResult
-		limit        int
-		pagesFetched int
-		want         bool
+	got := windowOrganicResults(results, 1, 2)
+	if len(got) != 3 || !got[0].Ad || got[1].Rank != 2 || got[2].Rank != 3 {
+		t.Fatalf("unexpected result window: %#v", got)
+	}
+}
+
+func TestFindMoreResultsButton(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	fixture, err := os.ReadFile("testdata/search_results.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	browser := ithelper.CreateBrowser(t)
+	page, err := browser.Navigate(context.Background(), "about:blank")
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	defer core.DeferClosePage(context.Background(), page, browser)()
+
+	cases := []struct {
+		html    string
+		wantHit bool
 	}{
-		{
-			name:         "first page is always fetched",
-			limit:        10,
-			pagesFetched: 0,
-			want:         true,
-		},
-		{
-			name:         "default limit does not chase a short first page",
-			results:      results(8, 2),
-			limit:        10,
-			pagesFetched: 1,
-			want:         false,
-		},
-		{
-			name:         "explicit larger limit can paginate",
-			results:      results(8, 0),
-			limit:        11,
-			pagesFetched: 1,
-			want:         true,
-		},
-		{
-			name:         "satisfied larger limit stops",
-			results:      results(11, 0),
-			limit:        11,
-			pagesFetched: 1,
-			want:         false,
-		},
-		{
-			name:         "unset internal query stops after first page",
-			results:      results(8, 0),
-			limit:        0,
-			pagesFetched: 1,
-			want:         false,
-		},
+		{string(fixture), true},                               // real DDG markup
+		{`<button id="js-more-results-btn">x</button>`, true}, // renamed id, substring fallback
+		{`<div>no button</div>`, false},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := core.ShouldFetchResultPage(core.CountOrganicResults(tt.results), tt.limit, tt.pagesFetched)
-			if got != tt.want {
-				t.Fatalf("ShouldFetchResultPage() = %t, want %t", got, tt.want)
-			}
-		})
+	for _, tc := range cases {
+		if err := page.SetDocumentContent(tc.html); err != nil {
+			t.Fatalf("set content: %v", err)
+		}
+		if hit := findMoreResultsButton(page) != nil; hit != tc.wantHit {
+			t.Fatalf("hit=%v want=%v", hit, tc.wantHit)
+		}
 	}
 }

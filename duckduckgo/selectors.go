@@ -14,6 +14,7 @@ var Selectors = struct {
 	Desc             []string
 	Link             []string
 	AdBadge          []string
+	MoreResults      []string
 	ImageResult      []string
 	ImageImg         []string
 	ImageTitle       []string
@@ -82,6 +83,10 @@ var Selectors = struct {
 		"[data-testid='ad-badge']",
 		".ad-badge",
 		".result--ad",
+	},
+	MoreResults: []string{
+		"#more-results",
+		"[id*='more-result']",
 	},
 	ImageResult: []string{
 		"figure[data-testid='image-result']",
