@@ -99,7 +99,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		}
 
 		// Validate that we have a proper URL
-		hrefStr := linkText.String()
+		hrefStr := strings.TrimSpace(linkText.String())
 		if hrefStr == "" || hrefStr == "#" || hrefStr == "javascript:void(0)" {
 			ddg.logger.Debug("Invalid href: %s", hrefStr)
 			continue

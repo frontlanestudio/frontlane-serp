@@ -79,6 +79,61 @@ func duckDuckGoKL(langCode, region string) string {
 	return ddgKLByLocale[locale.Language]
 }
 
+// addQueryText appends the "q" param, combining text with site/filetype
+// operators. Returns an error when the resulting query is empty.
+func addQueryText(params url.Values, q core.Query) error {
+	if q.Text == "" && q.Site == "" && q.Filetype == "" {
+		return errors.New("empty query built")
+	}
+	text := q.Text
+	if q.Site != "" {
+		text += " site:" + q.Site
+	}
+	if q.Filetype != "" {
+		text += " filetype:" + q.Filetype
+	}
+	params.Add("q", text)
+	return nil
+}
+
+// addDateRange appends the "df" param, converting the YYYYMMDD..YYYYMMDD
+// interval to DuckDuckGo's YYYY-MM-DD..YYYY-MM-DD form. No-op when unset.
+func addDateRange(params url.Values, interval string) error {
+	if interval == "" {
+		return nil
+	}
+	intervals := strings.Split(interval, "..")
+	if len(intervals) != 2 {
+		return errors.New("incorrect date interval provided")
+	}
+	start, err := time.Parse("20060102", intervals[0])
+	if err != nil {
+		return errors.New("invalid start date format, expected YYYYMMDD")
+	}
+	end, err := time.Parse("20060102", intervals[1])
+	if err != nil {
+		return errors.New("invalid end date format, expected YYYYMMDD")
+	}
+	params.Add("df", start.Format("2006-01-02")+".."+end.Format("2006-01-02"))
+	return nil
+}
+
+// buildParams assembles the query, date range, and locale params shared by web
+// and image search.
+func buildParams(q core.Query) (url.Values, error) {
+	params := url.Values{}
+	if err := addQueryText(params, q); err != nil {
+		return nil, err
+	}
+	if err := addDateRange(params, q.DateInterval); err != nil {
+		return nil, err
+	}
+	if kl := duckDuckGoKL(q.LangCode, q.Region); kl != "" {
+		params.Add("kl", kl)
+	}
+	return params, nil
+}
+
 // BuildURL builds a DuckDuckGo web search URL for the provided query and page
 // index. It returns an error when query text or date parameters are invalid.
 func BuildURL(q core.Query, page int) (string, error) {
@@ -86,66 +141,17 @@ func BuildURL(q core.Query, page int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	base.Path += ""
-	params := url.Values{}
-
-	// Set request text
-	if q.Text != "" || q.Site != "" || q.Filetype != "" {
-		text := q.Text
-		if q.Site != "" {
-			text += " site:" + q.Site
-		}
-		if q.Filetype != "" {
-			text += " filetype:" + q.Filetype
-		}
-
-		params.Add("q", text)
+	params, err := buildParams(q)
+	if err != nil {
+		return "", err
 	}
 
-	if len(params.Get("q")) == 0 {
-		return "", errors.New("empty query built")
-	}
-
-	// Set search date range
-	if q.DateInterval != "" {
-		intervals := strings.Split(q.DateInterval, "..")
-		if len(intervals) != 2 {
-			return "", errors.New("incorrect date interval provided")
-		}
-
-		// Convert from YYYYMMDD to YYYY-MM-DD format (DuckDuckGo requirement)
-		startDate, err := time.Parse("20060102", intervals[0])
-		if err != nil {
-			return "", errors.New("invalid start date format, expected YYYYMMDD")
-		}
-
-		endDate, err := time.Parse("20060102", intervals[1])
-		if err != nil {
-			return "", errors.New("invalid end date format, expected YYYYMMDD")
-		}
-
-		// DuckDuckGo uses YYYY-MM-DD..YYYY-MM-DD format
-		dateRange := fmt.Sprintf("%s..%s",
-			startDate.Format("2006-01-02"),
-			endDate.Format("2006-01-02"))
-		params.Add("df", dateRange)
-	}
-
-	if kl := duckDuckGoKL(q.LangCode, q.Region); kl != "" {
-		params.Add("kl", kl)
-	}
-
-	// DuckDuckGo specific parameters
 	params.Add("t", "h")    // HTML format
 	params.Add("ia", "web") // Web search
 
-	// Add pagination parameter if not on first page
+	// Pagination uses 's' (start offset); ~25 results per page.
 	if page > 0 {
-		// DuckDuckGo uses 's' parameter for pagination (start offset)
-		// Each page has approximately 25-30 results, but we'll use conservative estimate
-		offset := page * 25
-		params.Add("s", fmt.Sprintf("%d", offset))
+		params.Add("s", fmt.Sprintf("%d", page*25))
 	}
 
 	base.RawQuery = params.Encode()
@@ -159,58 +165,15 @@ func BuildImageURL(q core.Query) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	params, err := buildParams(q)
+	if err != nil {
+		return "", err
+	}
 
-	base.Path += ""
-	params := url.Values{}
 	params.Add("t", "h")        // HTML format
 	params.Add("iax", "images") // Image search
 	params.Add("ia", "images")
 
-	// Set request text
-	if q.Text != "" || q.Site != "" || q.Filetype != "" {
-		text := q.Text
-		if q.Site != "" {
-			text += " site:" + q.Site
-		}
-		if q.Filetype != "" {
-			text += " filetype:" + q.Filetype
-		}
-
-		params.Add("q", text)
-	}
-
-	if len(params.Get("q")) == 0 {
-		return "", errors.New("empty query built")
-	}
-
-	// Set search date range
-	if q.DateInterval != "" {
-		intervals := strings.Split(q.DateInterval, "..")
-		if len(intervals) != 2 {
-			return "", errors.New("incorrect date interval provided")
-		}
-
-		// Convert from YYYYMMDD to YYYY-MM-DD format (DuckDuckGo requirement)
-		startDate, err := time.Parse("20060102", intervals[0])
-		if err != nil {
-			return "", errors.New("invalid start date format, expected YYYYMMDD")
-		}
-
-		endDate, err := time.Parse("20060102", intervals[1])
-		if err != nil {
-			return "", errors.New("invalid end date format, expected YYYYMMDD")
-		}
-
-		// DuckDuckGo uses YYYY-MM-DD..YYYY-MM-DD format
-		dateRange := fmt.Sprintf("%s..%s",
-			startDate.Format("2006-01-02"),
-			endDate.Format("2006-01-02"))
-		params.Add("df", dateRange)
-	}
-
-	if kl := duckDuckGoKL(q.LangCode, q.Region); kl != "" {
-		params.Add("kl", kl)
-	}
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }
