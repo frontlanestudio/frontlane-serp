@@ -1,7 +1,7 @@
-use chrono::NaiveDate;
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::types::Query;
+use chrono::NaiveDate;
+use url::Url;
 
 pub fn build_url(q: &Query) -> Result<String> {
     if q.text.is_empty() && q.site.is_empty() && q.filetype.is_empty() {

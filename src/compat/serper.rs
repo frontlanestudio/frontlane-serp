@@ -134,10 +134,15 @@ pub fn convert_envelope_to_serper(env: &Envelope, req: &SerperRequest) -> Serper
                     attributes: HashMap::new(),
                 });
             }
-            crate::core::types::ResultType::PeopleAlsoAsk | crate::core::types::ResultType::RelatedQuestions => {
+            crate::core::types::ResultType::PeopleAlsoAsk
+            | crate::core::types::ResultType::RelatedQuestions => {
                 for item in &feature.items {
                     people_also_ask.push(SerperPeopleAlsoAsk {
-                        question: item.title.clone().or_else(|| item.text.clone()).unwrap_or_default(),
+                        question: item
+                            .title
+                            .clone()
+                            .or_else(|| item.text.clone())
+                            .unwrap_or_default(),
                         snippet: item.text.clone(),
                         title: item.title.clone(),
                         link: item.link.clone(),
@@ -146,7 +151,11 @@ pub fn convert_envelope_to_serper(env: &Envelope, req: &SerperRequest) -> Serper
             }
             crate::core::types::ResultType::RelatedSearches => {
                 for item in &feature.items {
-                    let query = item.text.clone().or_else(|| item.title.clone()).unwrap_or_default();
+                    let query = item
+                        .text
+                        .clone()
+                        .or_else(|| item.title.clone())
+                        .unwrap_or_default();
                     if !query.is_empty() {
                         related_searches.push(SerperRelatedSearch { query });
                     }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::core::types::SerpFeature;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -26,7 +26,6 @@ pub enum DeviceType {
     Desktop,
     Mobile,
 }
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RankRequest {

@@ -432,7 +432,8 @@ impl AppConfig {
                 self.server.port = port;
             }
         }
-        if let Ok(proxy) = std::env::var("OPENSERP_PROXY").or_else(|_| std::env::var("HTTP_PROXY")) {
+        if let Ok(proxy) = std::env::var("OPENSERP_PROXY").or_else(|_| std::env::var("HTTP_PROXY"))
+        {
             self.proxies.global = Some(proxy);
         }
         if let Ok(debug) = std::env::var("OPENSERP_DEBUG") {

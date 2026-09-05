@@ -1,7 +1,7 @@
-use chrono::NaiveDate;
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::types::Query;
+use chrono::NaiveDate;
+use url::Url;
 
 pub fn ecosia_freshness(date_interval: &str) -> Result<Option<&'static str>> {
     let s = date_interval.trim();
@@ -10,16 +10,22 @@ pub fn ecosia_freshness(date_interval: &str) -> Result<Option<&'static str>> {
     }
     let parts: Vec<&str> = s.split("..").collect();
     if parts.len() != 2 {
-        return Err(SerpError::InvalidParam("incorrect date interval provided, expected YYYYMMDD..YYYYMMDD".to_string()));
+        return Err(SerpError::InvalidParam(
+            "incorrect date interval provided, expected YYYYMMDD..YYYYMMDD".to_string(),
+        ));
     }
-    let start = NaiveDate::parse_from_str(parts[0], "%Y%m%d")
-        .map_err(|_| SerpError::InvalidParam("invalid start date format, expected YYYYMMDD".to_string()))?;
-    let end = NaiveDate::parse_from_str(parts[1], "%Y%m%d")
-        .map_err(|_| SerpError::InvalidParam("invalid end date format, expected YYYYMMDD".to_string()))?;
+    let start = NaiveDate::parse_from_str(parts[0], "%Y%m%d").map_err(|_| {
+        SerpError::InvalidParam("invalid start date format, expected YYYYMMDD".to_string())
+    })?;
+    let end = NaiveDate::parse_from_str(parts[1], "%Y%m%d").map_err(|_| {
+        SerpError::InvalidParam("invalid end date format, expected YYYYMMDD".to_string())
+    })?;
 
     let days = (end - start).num_days();
     if days < 0 {
-        return Err(SerpError::InvalidParam("date interval end is before start".to_string()));
+        return Err(SerpError::InvalidParam(
+            "date interval end is before start".to_string(),
+        ));
     }
     if days <= 1 {
         Ok(Some("day"))

@@ -1,7 +1,7 @@
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::locale::{country_from_region, google_uule, parse_locale};
 use crate::core::types::Query;
+use url::Url;
 
 pub fn google_domain(country: &str) -> &'static str {
     match country.to_lowercase().as_str() {
@@ -59,7 +59,10 @@ pub fn build_url(q: &Query) -> Result<String> {
         if !q.date_interval.is_empty() {
             let intervals: Vec<&str> = q.date_interval.split("..").collect();
             if intervals.len() == 2 {
-                pairs.append_pair("tbs", &format!("cdr:1,cd_min:{},cd_max:{}", intervals[0], intervals[1]));
+                pairs.append_pair(
+                    "tbs",
+                    &format!("cdr:1,cd_min:{},cd_max:{}", intervals[0], intervals[1]),
+                );
             }
         }
 

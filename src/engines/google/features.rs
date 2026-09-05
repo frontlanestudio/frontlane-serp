@@ -1,6 +1,6 @@
-use scraper::Html;
 use crate::core::feature_selectors::{extract_serp_features_by_selectors, SerpFeatureSelector};
 use crate::core::types::{ResultType, SerpFeature};
+use scraper::Html;
 
 const GOOGLE_FEATURE_SPECS: &[SerpFeatureSelector] = &[
     SerpFeatureSelector {
@@ -24,7 +24,10 @@ const GOOGLE_FEATURE_SPECS: &[SerpFeatureSelector] = &[
             "div[data-subtree='aifb']",
         ],
         item_selector: &[],
-        link_selector: &["div[data-subtree='aimc'] a[href^='http']", "a[href^='http']"],
+        link_selector: &[
+            "div[data-subtree='aimc'] a[href^='http']",
+            "a[href^='http']",
+        ],
         position: 1,
         confidence: 0.75,
         single_match: true,
@@ -44,7 +47,10 @@ const GOOGLE_FEATURE_SPECS: &[SerpFeatureSelector] = &[
     SerpFeatureSelector {
         feature_type: ResultType::RelatedSearches,
         title: "Related searches",
-        container: &["div[jsname='yEVEwb'][role='navigation']", "div[data-abe='1']"],
+        container: &[
+            "div[jsname='yEVEwb'][role='navigation']",
+            "div[data-abe='1']",
+        ],
         title_selector: &[],
         text_selector: &[],
         item_selector: &["a[href*='/search?']"],

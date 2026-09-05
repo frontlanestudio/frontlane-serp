@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::error::{Result, SerpError};
 
@@ -114,7 +114,8 @@ impl CaptchaSolver {
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.config.enabled && (self.mock_solution.is_some() || !self.config.api_key.trim().is_empty())
+        self.config.enabled
+            && (self.mock_solution.is_some() || !self.config.api_key.trim().is_empty())
     }
 
     pub async fn solve_cloudflare_challenge(
@@ -145,10 +146,12 @@ impl CaptchaSolver {
         let provider = self.config.provider.to_lowercase();
         match provider.as_str() {
             "capsolver" => {
-                self.solve_with_capsolver(url, &domain, proxy_url, user_agent).await
+                self.solve_with_capsolver(url, &domain, proxy_url, user_agent)
+                    .await
             }
             _ => {
-                self.solve_with_2captcha(url, &domain, proxy_url, user_agent).await
+                self.solve_with_2captcha(url, &domain, proxy_url, user_agent)
+                    .await
             }
         }
     }
@@ -161,7 +164,9 @@ impl CaptchaSolver {
         user_agent: &str,
     ) -> Result<CloudflareClearance> {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.config.max_poll_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                self.config.max_poll_timeout_secs,
+            ))
             .build()?;
 
         // 1. Create Task: AntiCloudflareTask or AntiTurnstileTask
@@ -198,8 +203,14 @@ impl CaptchaSolver {
         if let Some(err_code) = create_json.get("errorCode").and_then(|v| v.as_str()) {
             if !err_code.is_empty() && err_code != "0" {
                 record_solver_failure();
-                let desc = create_json.get("errorDescription").and_then(|v| v.as_str()).unwrap_or(err_code);
-                return Err(SerpError::ChallengeSolver(format!("CapSolver error: {}", desc)));
+                let desc = create_json
+                    .get("errorDescription")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(err_code);
+                return Err(SerpError::ChallengeSolver(format!(
+                    "CapSolver error: {}",
+                    desc
+                )));
             }
         }
 
@@ -228,14 +239,23 @@ impl CaptchaSolver {
                 .send()
                 .await;
 
-            let Ok(res) = result_res else { continue; };
-            let Ok(res_json) = res.json::<serde_json::Value>().await else { continue; };
+            let Ok(res) = result_res else {
+                continue;
+            };
+            let Ok(res_json) = res.json::<serde_json::Value>().await else {
+                continue;
+            };
 
-            let status = res_json.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let status = res_json
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if status == "ready" {
                 let solution = res_json.get("solution").ok_or_else(|| {
                     record_solver_failure();
-                    SerpError::ChallengeSolver("Missing solution object in CapSolver response".to_string())
+                    SerpError::ChallengeSolver(
+                        "Missing solution object in CapSolver response".to_string(),
+                    )
                 })?;
 
                 // CapSolver returns clearance cookie in solution.cookies.cf_clearance or solution.token
@@ -258,7 +278,9 @@ impl CaptchaSolver {
                 }
             } else if status == "failed" {
                 record_solver_failure();
-                return Err(SerpError::ChallengeSolver("CapSolver reported task failure".to_string()));
+                return Err(SerpError::ChallengeSolver(
+                    "CapSolver reported task failure".to_string(),
+                ));
             }
         }
 
@@ -277,7 +299,9 @@ impl CaptchaSolver {
         user_agent: &str,
     ) -> Result<CloudflareClearance> {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.config.max_poll_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                self.config.max_poll_timeout_secs,
+            ))
             .build()?;
 
         // 2Captcha in.php
@@ -312,8 +336,14 @@ impl CaptchaSolver {
 
         if in_json.get("status").and_then(|v| v.as_i64()) != Some(1) {
             record_solver_failure();
-            let err = in_json.get("request").and_then(|v| v.as_str()).unwrap_or("UNKNOWN_ERROR");
-            return Err(SerpError::ChallengeSolver(format!("2Captcha submission error: {}", err)));
+            let err = in_json
+                .get("request")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNKNOWN_ERROR");
+            return Err(SerpError::ChallengeSolver(format!(
+                "2Captcha submission error: {}",
+                err
+            )));
         }
 
         let request_id = in_json
@@ -337,8 +367,12 @@ impl CaptchaSolver {
                 self.config.api_key, request_id
             );
 
-            let Ok(res) = client.get(&poll_url).send().await else { continue; };
-            let Ok(res_json) = res.json::<serde_json::Value>().await else { continue; };
+            let Ok(res) = client.get(&poll_url).send().await else {
+                continue;
+            };
+            let Ok(res_json) = res.json::<serde_json::Value>().await else {
+                continue;
+            };
 
             if res_json.get("status").and_then(|v| v.as_i64()) == Some(1) {
                 if let Some(token) = res_json.get("request").and_then(|v| v.as_str()) {
@@ -354,7 +388,10 @@ impl CaptchaSolver {
             } else if let Some(req_status) = res_json.get("request").and_then(|v| v.as_str()) {
                 if req_status != "CAPCHA_NOT_READY" {
                     record_solver_failure();
-                    return Err(SerpError::ChallengeSolver(format!("2Captcha error: {}", req_status)));
+                    return Err(SerpError::ChallengeSolver(format!(
+                        "2Captcha error: {}",
+                        req_status
+                    )));
                 }
             }
         }

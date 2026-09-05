@@ -10,4 +10,8 @@ pub const AD_MARKERS: &[&str] = &[
 ];
 pub const LINK: &str = "a";
 pub const DESC: &str = "div.c-abstract";
-pub const DESC_ALT: &[&str] = &["[class*='content-right_']", "[class*='summary-gap_']", "div.text_2NOr6"];
+pub const DESC_ALT: &[&str] = &[
+    "[class*='content-right_']",
+    "[class*='summary-gap_']",
+    "div.text_2NOr6",
+];

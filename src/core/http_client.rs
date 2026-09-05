@@ -1,8 +1,10 @@
-use std::time::Duration;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, USER_AGENT};
-use reqwest::{Client, Proxy};
 use crate::core::error::{Result, SerpError};
 use crate::core::locale::build_accept_language_header;
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, USER_AGENT,
+};
+use reqwest::{Client, Proxy};
+use std::time::Duration;
 
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
 pub const MACOS_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
@@ -79,7 +81,9 @@ impl HttpClient {
         );
         headers.insert(
             "sec-ch-ua",
-            HeaderValue::from_static("\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"133\", \"Chromium\";v=\"133\""),
+            HeaderValue::from_static(
+                "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"133\", \"Chromium\";v=\"133\"",
+            ),
         );
         headers.insert("sec-ch-ua-mobile", HeaderValue::from_static("?0"));
         headers.insert(
@@ -118,7 +122,11 @@ impl HttpClient {
         self.client.get(url).send().await
     }
 
-    pub async fn post_json<T: serde::Serialize>(&self, url: &str, body: &T) -> reqwest::Result<reqwest::Response> {
+    pub async fn post_json<T: serde::Serialize>(
+        &self,
+        url: &str,
+        body: &T,
+    ) -> reqwest::Result<reqwest::Response> {
         self.client.post(url).json(body).send().await
     }
 
@@ -146,6 +154,11 @@ impl HttpClient {
         }
 
         Ok(body)
+    }
+
+    pub async fn fetch_with_headers(&self, url: &str, headers: HeaderMap) -> Result<String> {
+        self.fetch_with_options(url, None, None, None, Some(headers))
+            .await
     }
 
     pub async fn fetch_raw_response(

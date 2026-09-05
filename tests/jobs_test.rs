@@ -11,16 +11,14 @@ async fn test_job_manager_lifecycle() {
     let engine = Arc::new(Google::new(http_client));
 
     let req = BatchRankRequest {
-        targets: vec![
-            BatchRankItem {
-                target: "example.com".to_string(),
-                query: "sample query".to_string(),
-                last_rank: 0,
-                strategy: RankStrategy::Basic,
-                device: DeviceType::Desktop,
-                match_mode: DomainMatchMode::Subdomain,
-            }
-        ],
+        targets: vec![BatchRankItem {
+            target: "example.com".to_string(),
+            query: "sample query".to_string(),
+            last_rank: 0,
+            strategy: RankStrategy::Basic,
+            device: DeviceType::Desktop,
+            match_mode: DomainMatchMode::Subdomain,
+        }],
         engine: "google".to_string(),
         concurrency: 2,
         webhook_url: None,

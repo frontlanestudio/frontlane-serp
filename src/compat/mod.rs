@@ -1,5 +1,5 @@
-pub mod serper;
 pub mod serpapi;
+pub mod serper;
 
-pub use serper::{SerperRequest, SerperResponse, convert_envelope_to_serper};
-pub use serpapi::{SerpApiParams, SerpApiResponse, convert_envelope_to_serpapi};
+pub use serpapi::{convert_envelope_to_serpapi, SerpApiParams, SerpApiResponse};
+pub use serper::{convert_envelope_to_serper, SerperRequest, SerperResponse};

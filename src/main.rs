@@ -2,7 +2,9 @@ use clap::Parser;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use frontlane_serp::cli::{Cli, CliFormat, Commands, ExtractArgs, RankArgs, SearchArgs, SuggestArgs};
+use frontlane_serp::cli::{
+    Cli, CliFormat, Commands, ExtractArgs, RankArgs, SearchArgs, SuggestArgs,
+};
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
 use frontlane_serp::core::format::render_envelope;
@@ -12,12 +14,14 @@ use frontlane_serp::core::types::{
     Envelope, OutputFormat, Pagination, Query, ResultItem, SerpFeature,
 };
 use frontlane_serp::engines::{
-    Baidu, Bing, DuckDuckGo, Ecosia, Google, Yandex,
+    Baidu, Bing, CratesIo, DuckDuckGo, Ecosia, GitHub, Google, HackerNews, Wikipedia, Yandex,
 };
 use frontlane_serp::extract::Extractor;
 use frontlane_serp::mcp::run_stdio_mcp_server;
 use frontlane_serp::mega::MegaSearcher;
-use frontlane_serp::rank::{probe_engine_rank, DeviceType, DomainMatchMode, RankRequest, RankStrategy};
+use frontlane_serp::rank::{
+    probe_engine_rank, DeviceType, DomainMatchMode, RankRequest, RankStrategy,
+};
 use frontlane_serp::server::run_server;
 use frontlane_serp::suggest::SuggestClient;
 
@@ -38,6 +42,10 @@ fn build_all_engines(http_client: &HttpClient) -> Vec<Arc<dyn SearchEngine>> {
         Arc::new(Yandex::new(http_client.clone())),
         Arc::new(Baidu::new(http_client.clone())),
         Arc::new(Ecosia::new(http_client.clone())),
+        Arc::new(HackerNews::new(http_client.clone())),
+        Arc::new(GitHub::new(http_client.clone())),
+        Arc::new(CratesIo::new(http_client.clone())),
+        Arc::new(Wikipedia::new(http_client.clone())),
     ]
 }
 
@@ -53,7 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::filter::LevelFilter::from_level(log_level))
+        .with(tracing_subscriber::filter::LevelFilter::from_level(
+            log_level,
+        ))
         .init();
 
     let mut config = AppConfig::load(&cli.config).unwrap_or_default();
@@ -116,6 +126,9 @@ async fn handle_search(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let norm_engine = match args.engine.to_lowercase().as_str() {
         "ddg" | "duck" => "duckduckgo".to_string(),
+        "hn" => "hackernews".to_string(),
+        "gh" => "github".to_string(),
+        "wiki" => "wikipedia".to_string(),
         n => n.to_string(),
     };
 
@@ -153,7 +166,13 @@ async fn handle_search(
             .engines
             .as_deref()
             .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
-            .unwrap_or_else(|| vec!["google".to_string(), "bing".to_string(), "duckduckgo".to_string()]);
+            .unwrap_or_else(|| {
+                vec![
+                    "google".to_string(),
+                    "bing".to_string(),
+                    "duckduckgo".to_string(),
+                ]
+            });
 
         let env = mega.search(&query, &engines_req, &args.mode).await?;
         println!("{}", render_envelope(&env, format));
@@ -168,7 +187,12 @@ async fn handle_search(
         let results = engine.search(&query).await?;
         let took_ms = start_time.elapsed().as_millis() as i64;
 
-        let mut env = Envelope::new(&query, uuid::Uuid::now_v7().to_string(), started_at, vec![norm_engine.clone()]);
+        let mut env = Envelope::new(
+            &query,
+            uuid::Uuid::now_v7().to_string(),
+            started_at,
+            vec![norm_engine.clone()],
+        );
         env.meta.took_ms = took_ms;
         env.meta.engines_responded = vec![norm_engine.clone()];
 
@@ -331,10 +355,16 @@ async fn handle_mcp(
         engine_map.insert(e.name().to_string(), e.clone());
     }
     let extractor = Arc::new(Extractor::new(http_client.clone()));
-    let mega = Arc::new(MegaSearcher::new(engines.to_vec(), Some((*extractor).clone())));
+    let mega = Arc::new(MegaSearcher::new(
+        engines.to_vec(),
+        Some((*extractor).clone()),
+    ));
     let suggest = SuggestClient::new(http_client.clone());
+    let crawler = Arc::new(frontlane_serp::crawl::Crawler::new(
+        http_client.clone(),
+        extractor.clone(),
+    ));
 
-    run_stdio_mcp_server(engine_map, mega, extractor, suggest).await?;
+    run_stdio_mcp_server(engine_map, mega, extractor, suggest, crawler).await?;
     Ok(())
 }
-

@@ -1,7 +1,7 @@
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::locale::{country_from_region, parse_locale};
 use crate::core::types::Query;
+use url::Url;
 
 pub fn bing_country_for_lang(lang: &str) -> &'static str {
     match lang {
@@ -57,7 +57,11 @@ pub fn build_url(q: &Query) -> Result<String> {
         pairs.append_pair("q", &text);
 
         if !country.is_empty() {
-            let lang = if !loc.language.is_empty() { loc.language.as_str() } else { "en" };
+            let lang = if !loc.language.is_empty() {
+                loc.language.as_str()
+            } else {
+                "en"
+            };
             pairs.append_pair("mkt", &format!("{}-{}", lang, country));
             pairs.append_pair("setlang", lang);
             pairs.append_pair("cc", &country);

@@ -1,11 +1,11 @@
-use scraper::Html;
 use frontlane_serp::core::types::ResultType;
-use frontlane_serp::engines::google::features::extract_google_features;
+use frontlane_serp::engines::baidu::features::extract_baidu_features;
 use frontlane_serp::engines::bing::features::extract_bing_features;
 use frontlane_serp::engines::duckduckgo::features::extract_duckduckgo_features;
-use frontlane_serp::engines::yandex::features::extract_yandex_features;
-use frontlane_serp::engines::baidu::features::extract_baidu_features;
 use frontlane_serp::engines::ecosia::features::extract_ecosia_features;
+use frontlane_serp::engines::google::features::extract_google_features;
+use frontlane_serp::engines::yandex::features::extract_yandex_features;
+use scraper::Html;
 
 #[test]
 fn test_google_serp_features_extraction() {
@@ -34,9 +34,15 @@ fn test_google_serp_features_extraction() {
     let features = extract_google_features(&doc);
 
     assert!(!features.is_empty(), "Google should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AiSummary));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::PeopleAlsoAsk));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AiSummary));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::PeopleAlsoAsk));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }
 
 #[test]
@@ -61,9 +67,15 @@ fn test_bing_serp_features_extraction() {
     let features = extract_bing_features(&doc);
 
     assert!(!features.is_empty(), "Bing should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AnswerBox));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedQuestions));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AnswerBox));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedQuestions));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }
 
 #[test]
@@ -91,9 +103,15 @@ fn test_duckduckgo_serp_features_extraction() {
     let features = extract_duckduckgo_features(&doc);
 
     assert!(!features.is_empty(), "DuckDuckGo should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AiSummary));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AnswerBox));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AiSummary));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AnswerBox));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }
 
 #[test]
@@ -120,9 +138,15 @@ fn test_yandex_serp_features_extraction() {
     let features = extract_yandex_features(&doc);
 
     assert!(!features.is_empty(), "Yandex should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AiSummary));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AnswerBox));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AiSummary));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AnswerBox));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }
 
 #[test]
@@ -150,9 +174,15 @@ fn test_baidu_serp_features_extraction() {
     let features = extract_baidu_features(&doc);
 
     assert!(!features.is_empty(), "Baidu should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AiSummary));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AnswerBox));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AiSummary));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AnswerBox));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }
 
 #[test]
@@ -174,6 +204,10 @@ fn test_ecosia_serp_features_extraction() {
     let features = extract_ecosia_features(&doc);
 
     assert!(!features.is_empty(), "Ecosia should extract features");
-    assert!(features.iter().any(|f| f.feature_type == ResultType::AnswerBox));
-    assert!(features.iter().any(|f| f.feature_type == ResultType::RelatedSearches));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::AnswerBox));
+    assert!(features
+        .iter()
+        .any(|f| f.feature_type == ResultType::RelatedSearches));
 }

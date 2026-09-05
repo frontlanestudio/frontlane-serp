@@ -1,9 +1,11 @@
-use scraper::{Html, Selector};
+use super::selectors::*;
 use crate::core::engine::deduplicate_results;
 use crate::core::error::Result;
-use crate::core::page_helpers::{classify_challenge_document, normalize_whitespace, DocSignals, RankState};
+use crate::core::page_helpers::{
+    classify_challenge_document, normalize_whitespace, DocSignals, RankState,
+};
 use crate::core::types::{ImageData, ImageSource, ResultType, SearchResult};
-use super::selectors::*;
+use scraper::{Html, Selector};
 
 pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
     let document = Html::parse_document(html_str);
@@ -34,8 +36,13 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
     };
 
     for item in document.select(items) {
-        let is_ad = ad_sel.as_ref().is_some_and(|sel| item.select(sel).next().is_some());
-        let is_organic = res_sel.as_ref().is_some_and(|sel| item.select(sel).next().is_some()) || !is_ad;
+        let is_ad = ad_sel
+            .as_ref()
+            .is_some_and(|sel| item.select(sel).next().is_some());
+        let is_organic = res_sel
+            .as_ref()
+            .is_some_and(|sel| item.select(sel).next().is_some())
+            || !is_ad;
         if !is_ad && !is_organic {
             continue;
         }
@@ -61,7 +68,9 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
             continue;
         }
 
-        let mut title = t_el.value().attr("aria-label")
+        let mut title = t_el
+            .value()
+            .attr("aria-label")
             .or_else(|| t_el.value().attr("title"))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
@@ -99,7 +108,11 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
         results.push(SearchResult {
             rank,
             absolute_rank,
-            result_type: if is_ad { ResultType::Ad } else { ResultType::Organic },
+            result_type: if is_ad {
+                ResultType::Ad
+            } else {
+                ResultType::Organic
+            },
             url: href,
             title,
             description: desc,

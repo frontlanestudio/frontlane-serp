@@ -1,6 +1,8 @@
-use frontlane_serp::compat::{convert_envelope_to_serpapi, convert_envelope_to_serper, SerpApiParams, SerperRequest};
-use frontlane_serp::core::types::{Envelope, Position, Query, ResultItem, ResultType};
 use chrono::Utc;
+use frontlane_serp::compat::{
+    convert_envelope_to_serpapi, convert_envelope_to_serper, SerpApiParams, SerperRequest,
+};
+use frontlane_serp::core::types::{Envelope, Position, Query, ResultItem, ResultType};
 
 fn sample_envelope() -> Envelope {
     let q = Query {
@@ -28,7 +30,12 @@ fn sample_envelope() -> Envelope {
         guard_private_networks: false,
     };
 
-    let mut env = Envelope::new(&q, "req_123".to_string(), Utc::now(), vec!["google".to_string()]);
+    let mut env = Envelope::new(
+        &q,
+        "req_123".to_string(),
+        Utc::now(),
+        vec!["google".to_string()],
+    );
     env.meta.took_ms = 350;
 
     env.results.push(ResultItem {
@@ -38,7 +45,8 @@ fn sample_envelope() -> Envelope {
         title: "Rust Programming Language".to_string(),
         url: "https://www.rust-lang.org/".to_string(),
         display_url: "rust-lang.org".to_string(),
-        snippet: "A language empowering everyone to build reliable and efficient software.".to_string(),
+        snippet: "A language empowering everyone to build reliable and efficient software."
+            .to_string(),
         domain: "rust-lang.org".to_string(),
         favicon: "https://rust-lang.org/favicon.ico".to_string(),
         position: Some(Position { absolute: 1 }),
@@ -46,6 +54,9 @@ fn sample_envelope() -> Envelope {
         domain_info: None,
         classification: None,
         extracted: None,
+        score: None,
+        engine_consensus: None,
+        engines: None,
     });
 
     env
@@ -91,7 +102,13 @@ fn test_serpapi_conversion() {
     assert_eq!(serpapi_res.search_parameters.engine, "google");
     assert_eq!(serpapi_res.search_metadata.status, "Success");
     assert_eq!(serpapi_res.organic_results.len(), 1);
-    assert_eq!(serpapi_res.organic_results[0].title, "Rust Programming Language");
-    assert_eq!(serpapi_res.organic_results[0].link, "https://www.rust-lang.org/");
+    assert_eq!(
+        serpapi_res.organic_results[0].title,
+        "Rust Programming Language"
+    );
+    assert_eq!(
+        serpapi_res.organic_results[0].link,
+        "https://www.rust-lang.org/"
+    );
     assert_eq!(serpapi_res.organic_results[0].position, 1);
 }

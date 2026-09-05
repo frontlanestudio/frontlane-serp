@@ -1,8 +1,8 @@
-use chrono::NaiveDate;
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::locale::{country_from_region, parse_locale};
 use crate::core::types::Query;
+use chrono::NaiveDate;
+use url::Url;
 
 const BASE_URL: &str = "https://duckduckgo.com";
 const RAW_BASE_URL: &str = "https://html.duckduckgo.com/html/";
@@ -97,14 +97,22 @@ pub fn add_date_range(interval: &str) -> Result<Option<String>> {
     }
     let parts: Vec<&str> = interval.split("..").collect();
     if parts.len() != 2 {
-        return Err(SerpError::InvalidParam("incorrect date interval provided".to_string()));
+        return Err(SerpError::InvalidParam(
+            "incorrect date interval provided".to_string(),
+        ));
     }
-    let start = NaiveDate::parse_from_str(parts[0], "%Y%m%d")
-        .map_err(|_| SerpError::InvalidParam("invalid start date format, expected YYYYMMDD".to_string()))?;
-    let end = NaiveDate::parse_from_str(parts[1], "%Y%m%d")
-        .map_err(|_| SerpError::InvalidParam("invalid end date format, expected YYYYMMDD".to_string()))?;
+    let start = NaiveDate::parse_from_str(parts[0], "%Y%m%d").map_err(|_| {
+        SerpError::InvalidParam("invalid start date format, expected YYYYMMDD".to_string())
+    })?;
+    let end = NaiveDate::parse_from_str(parts[1], "%Y%m%d").map_err(|_| {
+        SerpError::InvalidParam("invalid end date format, expected YYYYMMDD".to_string())
+    })?;
 
-    Ok(Some(format!("{}..{}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d"))))
+    Ok(Some(format!(
+        "{}..{}",
+        start.format("%Y-%m-%d"),
+        end.format("%Y-%m-%d")
+    )))
 }
 
 pub fn build_url(q: &Query, page: usize) -> Result<String> {

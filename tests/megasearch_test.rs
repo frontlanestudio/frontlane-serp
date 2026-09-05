@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use async_trait::async_trait;
 use frontlane_serp::core::engine::SearchEngine;
 use frontlane_serp::core::error::Result;
 use frontlane_serp::core::types::{Query, ResultType, SearchResult};
 use frontlane_serp::mega::MegaSearcher;
+use std::sync::Arc;
 
 struct MockEngine {
     name: &'static str,
@@ -114,12 +114,27 @@ async fn test_megasearch_dedup_and_clusters() {
     };
 
     let envelope = mega
-        .search(&q, &["mock_a".to_string(), "mock_b".to_string()], "balanced")
+        .search(
+            &q,
+            &["mock_a".to_string(), "mock_b".to_string()],
+            "balanced",
+        )
         .await
         .expect("megasearch should succeed");
 
     // https://example.com/rust and https://example.com/rust?utm_source=test should deduplicate to 1 result
     assert_eq!(envelope.results.len(), 3);
+
+    // Top result should be rust with consensus = 2 and highest RRF score
+    let top = &envelope.results[0];
+    assert!(top.url.contains("example.com/rust"));
+    assert_eq!(top.rank, 1);
+    assert_eq!(top.engine_consensus, Some(2));
+    assert!(top.score.is_some());
+    assert!(top.score.unwrap() > 0.03); // 2 / (60 + 1) = 0.0328
+    let engines = top.engines.as_ref().expect("engines list present");
+    assert!(engines.contains(&"mock_a".to_string()));
+    assert!(engines.contains(&"mock_b".to_string()));
 
     // Clusters should group the rust result from both engines
     let clusters = envelope.clusters.expect("clusters must be present");

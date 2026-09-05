@@ -1,5 +1,5 @@
-use scraper::{Html, Selector};
 use crate::core::error::{Result, SerpError};
+use scraper::{Html, Selector};
 
 pub struct DocSignals<'a> {
     pub captcha_selectors: &'a [&'a str],
@@ -18,7 +18,12 @@ pub fn classify_challenge_document(html: &Html, s: DocSignals) -> Result<()> {
     }
 
     if !s.captcha_markers.is_empty() || !s.empty_markers.is_empty() {
-        let text: String = html.root_element().text().collect::<Vec<_>>().join(" ").to_lowercase();
+        let text: String = html
+            .root_element()
+            .text()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
         for marker in s.captcha_markers {
             if text.contains(marker) {
                 return Err(SerpError::CaptchaDetected);

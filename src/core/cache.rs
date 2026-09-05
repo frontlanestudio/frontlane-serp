@@ -1,8 +1,8 @@
-use std::time::Duration;
-use moka::future::Cache;
-use sha2::{Digest, Sha256};
 use crate::core::locale::country_from_region;
 use crate::core::types::Query;
+use moka::future::Cache;
+use sha2::{Digest, Sha256};
+use std::time::Duration;
 
 pub fn cache_token(value: &str) -> String {
     value.trim().to_lowercase()
@@ -16,8 +16,16 @@ pub fn build_cache_key(engine: &str, action: &str, q: &Query) -> String {
     } else {
         String::new()
     };
-    let class = q.proxy_class.as_deref().map(cache_token).unwrap_or_default();
-    let provider = q.proxy_provider.as_deref().map(cache_token).unwrap_or_default();
+    let class = q
+        .proxy_class
+        .as_deref()
+        .map(cache_token)
+        .unwrap_or_default();
+    let provider = q
+        .proxy_provider
+        .as_deref()
+        .map(cache_token)
+        .unwrap_or_default();
 
     let raw = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
@@ -87,4 +95,3 @@ impl ResponseCache {
         self.len() == 0
     }
 }
-

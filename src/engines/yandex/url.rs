@@ -1,7 +1,7 @@
-use url::Url;
 use crate::core::error::{Result, SerpError};
 use crate::core::locale::{parse_locale, yandex_lr};
 use crate::core::types::Query;
+use url::Url;
 
 pub fn build_url(q: &Query, page: usize) -> Result<String> {
     if q.text.is_empty() && q.site.is_empty() && q.filetype.is_empty() {

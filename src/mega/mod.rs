@@ -1,7 +1,7 @@
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use chrono::Utc;
 use tokio::task::JoinSet;
 
 use crate::core::clusters::build_clusters;
@@ -9,8 +9,8 @@ use crate::core::engine::SearchEngine;
 use crate::core::error::Result;
 use crate::core::response_builder::{enrich_image_result, enrich_result, normalize_url};
 use crate::core::types::{
-    EngineErrorDetail, Envelope, ImageEnvelope, ImageResult, Pagination, Query,
-    ResultItem, SearchResult, SerpFeature,
+    EngineErrorDetail, Envelope, ImageEnvelope, ImageResult, Pagination, Query, ResultItem,
+    SearchResult, SerpFeature,
 };
 use crate::extract::Extractor;
 
@@ -26,10 +26,18 @@ impl MegaSearcher {
         for e in engines {
             map.insert(e.name().to_string(), e);
         }
-        Self { engines: map, extractor }
+        Self {
+            engines: map,
+            extractor,
+        }
     }
 
-    pub async fn search(&self, query: &Query, engines_requested: &[String], mode: &str) -> Result<Envelope> {
+    pub async fn search(
+        &self,
+        query: &Query,
+        engines_requested: &[String],
+        mode: &str,
+    ) -> Result<Envelope> {
         let started_at = Utc::now();
         let start_time = Instant::now();
 
@@ -121,19 +129,28 @@ impl MegaSearcher {
         // Build clusters across all engine results before deduplication
         let clusters = build_clusters(&enriched_results, engines_requested.len());
 
-        // Deduplicate across engines by normalized URL, keeping best rank
-        let deduped = deduplicate_mega_results(enriched_results);
+        // Deduplicate and rank-fuse across engines via Reciprocal Rank Fusion (RRF)
+        let deduped = reciprocal_rank_fusion(enriched_results, RRF_K);
 
         // Extraction if requested
         let mut final_results = deduped;
         if query.extract {
             if let Some(ref ext) = self.extractor {
                 let extract_count = query.extract_top.min(final_results.len());
-                let lane_key = query.proxy_session_id.as_ref().map(|sid| {
-                    crate::core::proxy::ProxyLaneKey::new("default", "mega", sid)
-                });
+                let lane_key = query
+                    .proxy_session_id
+                    .as_ref()
+                    .map(|sid| crate::core::proxy::ProxyLaneKey::new("default", "mega", sid));
                 for item in final_results.iter_mut().take(extract_count) {
-                    if let Ok(content) = ext.extract_with_options(&item.url, true, query.proxy_url.as_deref(), lane_key.as_ref()).await {
+                    if let Ok(content) = ext
+                        .extract_with_options(
+                            &item.url,
+                            true,
+                            query.proxy_url.as_deref(),
+                            lane_key.as_ref(),
+                        )
+                        .await
+                    {
                         item.extracted = Some(content);
                     }
                 }
@@ -141,7 +158,12 @@ impl MegaSearcher {
         }
 
         let took_ms = start_time.elapsed().as_millis() as i64;
-        let mut env = Envelope::new(query, uuid::Uuid::now_v7().to_string(), started_at, engines_requested.to_vec());
+        let mut env = Envelope::new(
+            query,
+            uuid::Uuid::now_v7().to_string(),
+            started_at,
+            engines_requested.to_vec(),
+        );
         env.meta.took_ms = took_ms;
         env.meta.engines_responded = engines_responded;
         env.meta.engines_failed = engines_failed;
@@ -158,7 +180,11 @@ impl MegaSearcher {
         Ok(env)
     }
 
-    pub async fn search_image(&self, query: &Query, engines_requested: &[String]) -> Result<ImageEnvelope> {
+    pub async fn search_image(
+        &self,
+        query: &Query,
+        engines_requested: &[String],
+    ) -> Result<ImageEnvelope> {
         let started_at = Utc::now();
         let start_time = Instant::now();
 
@@ -227,8 +253,17 @@ impl MegaSearcher {
     }
 }
 
-fn deduplicate_mega_results(results: Vec<ResultItem>) -> Vec<ResultItem> {
-    let mut map: HashMap<String, ResultItem> = HashMap::new();
+pub const RRF_K: usize = 60;
+
+pub fn reciprocal_rank_fusion(results: Vec<ResultItem>, k: usize) -> Vec<ResultItem> {
+    struct FusionGroup {
+        best_item: ResultItem,
+        engines: Vec<String>,
+        rrf_score: f64,
+        best_rank: usize,
+    }
+
+    let mut map: HashMap<String, FusionGroup> = HashMap::new();
     let mut order = Vec::new();
 
     for r in results {
@@ -236,23 +271,71 @@ fn deduplicate_mega_results(results: Vec<ResultItem>) -> Vec<ResultItem> {
         if norm.is_empty() {
             continue;
         }
-        if let Some(existing) = map.get_mut(&norm) {
-            if r.rank > 0 && (existing.rank == 0 || r.rank < existing.rank) {
-                *existing = r;
+
+        let rank = if r.rank > 0 { r.rank } else { 1 };
+        let rrf_contrib = 1.0 / (k + rank) as f64;
+        let engine_name = r.engine.clone();
+
+        if let Some(group) = map.get_mut(&norm) {
+            group.rrf_score += rrf_contrib;
+            if !group.engines.contains(&engine_name) {
+                group.engines.push(engine_name);
+            }
+            if r.rank > 0 && (group.best_rank == 0 || r.rank < group.best_rank) {
+                group.best_rank = r.rank;
+                group.best_item.title = r.title;
+                group.best_item.snippet = r.snippet;
+                group.best_item.engine = r.engine;
             }
         } else {
             order.push(norm.clone());
-            map.insert(norm, r);
+            map.insert(
+                norm,
+                FusionGroup {
+                    best_rank: if r.rank > 0 { r.rank } else { 1 },
+                    best_item: r,
+                    engines: vec![engine_name],
+                    rrf_score: rrf_contrib,
+                },
+            );
         }
     }
 
-    let mut deduped: Vec<ResultItem> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
-    deduped.sort_by(|a, b| {
-        a.rank
-            .cmp(&b.rank)
-            .then_with(|| a.engine.cmp(&b.engine))
+    let mut fused: Vec<ResultItem> = order
+        .into_iter()
+        .filter_map(|k| {
+            if let Some(mut group) = map.remove(&k) {
+                group.engines.sort();
+                let consensus = group.engines.len();
+                let mut item = group.best_item;
+                item.score = Some((group.rrf_score * 10000.0).round() / 10000.0);
+                item.engine_consensus = Some(consensus);
+                item.engines = Some(group.engines);
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    fused.sort_by(|a, b| {
+        b.score
+            .unwrap_or(0.0)
+            .partial_cmp(&a.score.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.engine_consensus
+                    .unwrap_or(0)
+                    .cmp(&a.engine_consensus.unwrap_or(0))
+            })
+            .then_with(|| a.rank.cmp(&b.rank))
             .then_with(|| a.url.cmp(&b.url))
     });
 
-    deduped
+    for (i, item) in fused.iter_mut().enumerate() {
+        item.rank = i + 1;
+        item.position = Some(crate::core::types::Position { absolute: i + 1 });
+    }
+
+    fused
 }

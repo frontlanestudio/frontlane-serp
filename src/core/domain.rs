@@ -1,7 +1,7 @@
+use crate::core::types::{Classification, DomainInfo};
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
-use serde::Deserialize;
-use crate::core::types::{Classification, DomainInfo};
 
 const DEFAULT_ENRICHMENT_DOMAINS_YAML: &str = include_str!("enrichment_domains.yaml");
 
@@ -33,7 +33,8 @@ static ENRICHMENT_CONFIG: OnceLock<EnrichmentConfig> = OnceLock::new();
 fn get_enrichment_config() -> &'static EnrichmentConfig {
     ENRICHMENT_CONFIG.get_or_init(|| {
         let yaml_str = if let Ok(path) = std::env::var("OPENSERP_ENRICHMENT_DOMAINS_FILE") {
-            std::fs::read_to_string(path.trim()).unwrap_or_else(|_| DEFAULT_ENRICHMENT_DOMAINS_YAML.to_string())
+            std::fs::read_to_string(path.trim())
+                .unwrap_or_else(|_| DEFAULT_ENRICHMENT_DOMAINS_YAML.to_string())
         } else {
             DEFAULT_ENRICHMENT_DOMAINS_YAML.to_string()
         };
@@ -96,7 +97,10 @@ pub fn split_domain(domain: &str) -> (Option<String>, Option<String>) {
     let len = parts.len();
     if len >= 3 {
         let last_two = format!("{}.{}", parts[len - 2], parts[len - 1]);
-        if matches!(last_two.as_str(), "co.uk" | "org.uk" | "ac.uk" | "gov.uk" | "com.au" | "net.au" | "co.jp" | "com.br") {
+        if matches!(
+            last_two.as_str(),
+            "co.uk" | "org.uk" | "ac.uk" | "gov.uk" | "com.au" | "net.au" | "co.jp" | "com.br"
+        ) {
             let sld = parts[len - 3].to_string();
             return (Some(last_two), Some(sld));
         }
@@ -112,7 +116,12 @@ fn domain_category(domain: &str, tld: Option<&str>, cfg: &EnrichmentConfig) -> S
     if tld_str == "gov" || tld_str.ends_with(".gov") || domain.ends_with(".gov") {
         return "gov".to_string();
     }
-    if tld_str == "edu" || tld_str.ends_with(".edu") || tld_str == "ac.uk" || domain.ends_with(".edu") || domain.ends_with(".ac.uk") {
+    if tld_str == "edu"
+        || tld_str.ends_with(".edu")
+        || tld_str == "ac.uk"
+        || domain.ends_with(".edu")
+        || domain.ends_with(".ac.uk")
+    {
         return "edu".to_string();
     }
     if tld_str == "mil" {
@@ -142,11 +151,7 @@ pub fn enrich_domain_info(domain: &str) -> Option<DomainInfo> {
     let cfg = get_enrichment_config();
     let category = domain_category(&norm, tld.as_deref(), cfg);
 
-    Some(DomainInfo {
-        tld,
-        sld,
-        category,
-    })
+    Some(DomainInfo { tld, sld, category })
 }
 
 pub fn classify_content_type(raw_url: &str) -> String {
@@ -155,13 +160,22 @@ pub fn classify_content_type(raw_url: &str) -> String {
         "article".to_string()
     } else if lower.ends_with(".pdf") || lower.contains(".pdf?") {
         "document".to_string()
-    } else if lower.contains("/watch?v=") || lower.contains("/video/") || lower.contains("/videos/") {
+    } else if lower.contains("/watch?v=") || lower.contains("/video/") || lower.contains("/videos/")
+    {
         "video".to_string()
-    } else if lower.contains("/forum/") || lower.contains("/thread/") || lower.contains("/discussion/")
-        || lower.contains("/t/") || lower.contains("/questions/") || lower.contains("/q/")
+    } else if lower.contains("/forum/")
+        || lower.contains("/thread/")
+        || lower.contains("/discussion/")
+        || lower.contains("/t/")
+        || lower.contains("/questions/")
+        || lower.contains("/q/")
     {
         "forum_thread".to_string()
-    } else if lower.contains("/blog/") || lower.contains("/post/") || lower.contains("/article/") || lower.contains("/news/") {
+    } else if lower.contains("/blog/")
+        || lower.contains("/post/")
+        || lower.contains("/article/")
+        || lower.contains("/news/")
+    {
         "article".to_string()
     } else {
         "webpage".to_string()

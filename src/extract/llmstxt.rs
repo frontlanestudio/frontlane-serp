@@ -1,5 +1,5 @@
-use url::Url;
 use crate::core::http_client::HttpClient;
+use url::Url;
 
 const LLMS_TXT_CANDIDATES: &[&str] = &["/llms-full.txt", "/llms.txt"];
 const MIN_LLMS_TXT_CHARS: usize = 200;

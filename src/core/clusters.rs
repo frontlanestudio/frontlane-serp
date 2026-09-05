@@ -1,9 +1,13 @@
-use std::collections::HashMap;
 use crate::core::response_builder::{build_cluster_id, normalize_url};
 use crate::core::types::{Cluster, ClusterOccurrence, ResultItem};
+use std::collections::HashMap;
 
 pub fn build_clusters(results: &[ResultItem], engines_queried: usize) -> Vec<Cluster> {
-    let engines_queried = if engines_queried == 0 { 1 } else { engines_queried };
+    let engines_queried = if engines_queried == 0 {
+        1
+    } else {
+        engines_queried
+    };
 
     struct ClusterAccum {
         occurrences: Vec<ClusterOccurrence>,

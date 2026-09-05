@@ -1,6 +1,6 @@
-use scraper::Html;
 use crate::core::feature_selectors::{extract_serp_features_by_selectors, SerpFeatureSelector};
 use crate::core::types::{ResultType, SerpFeature};
+use scraper::Html;
 
 const BING_FEATURE_SPECS: &[SerpFeatureSelector] = &[
     SerpFeatureSelector {
@@ -41,7 +41,13 @@ const BING_FEATURE_SPECS: &[SerpFeatureSelector] = &[
         feature_type: ResultType::RelatedSearches,
         title: "Related searches",
         container: &[
-            "#brsv3", "#rs_root", "#inline_rs", "#brs", "#b_rs", "ol#b_rs", "li.b_rs",
+            "#brsv3",
+            "#rs_root",
+            "#inline_rs",
+            "#brs",
+            "#b_rs",
+            "ol#b_rs",
+            "li.b_rs",
         ],
         title_selector: &[],
         text_selector: &[],

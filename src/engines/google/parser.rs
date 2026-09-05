@@ -1,11 +1,13 @@
-use std::sync::LazyLock;
-use regex::Regex;
-use scraper::{Html, Selector};
+use super::selectors::*;
 use crate::core::engine::deduplicate_results;
 use crate::core::error::Result;
-use crate::core::page_helpers::{classify_challenge_document, normalize_whitespace, DocSignals, RankState};
+use crate::core::page_helpers::{
+    classify_challenge_document, normalize_whitespace, DocSignals, RankState,
+};
 use crate::core::types::{ImageData, ImageSource, ResultType, SearchResult};
-use super::selectors::*;
+use regex::Regex;
+use scraper::{Html, Selector};
+use std::sync::LazyLock;
 
 static ZERO_RESULTS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b0 results\b").unwrap());
 
@@ -24,7 +26,9 @@ pub fn classify_google_document(doc: &Html) -> Result<()> {
         for el in doc.select(&ns_sel) {
             let text = el.text().collect::<Vec<_>>().join(" ").to_lowercase();
             if text.contains("/httpservice/retry/enablejs") {
-                return Err(crate::core::error::SerpError::Blocked("enablejs soft block".to_string()));
+                return Err(crate::core::error::SerpError::Blocked(
+                    "enablejs soft block".to_string(),
+                ));
             }
         }
     }
@@ -86,7 +90,9 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
         }
 
         let Some(ref t_sel) = title_sel else { continue };
-        let Some(title_el) = item.select(t_sel).next() else { continue };
+        let Some(title_el) = item.select(t_sel).next() else {
+            continue;
+        };
         let title = normalize_whitespace(&title_el.text().collect::<Vec<_>>().join(" "));
         if title.is_empty() {
             continue;
@@ -148,7 +154,11 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
         results.push(SearchResult {
             rank,
             absolute_rank,
-            result_type: if is_ad { ResultType::Ad } else { ResultType::Organic },
+            result_type: if is_ad {
+                ResultType::Ad
+            } else {
+                ResultType::Organic
+            },
             url: href,
             title,
             description: desc,

@@ -10,17 +10,19 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::compat::{
+    convert_envelope_to_serpapi, convert_envelope_to_serper, SerpApiParams, SerperRequest,
+};
 use crate::core::error::SerpError;
 use crate::core::format::{render_envelope, render_image_envelope};
 use crate::core::response_builder::{enrich_image_result, enrich_result};
 use crate::core::types::{
-    DEFAULT_QUERY_LIMIT, Envelope, ImageEnvelope, OutputFormat, Pagination, Query, ResultItem,
-    SerpFeature, API_VERSION,
+    Envelope, ImageEnvelope, OutputFormat, Pagination, Query, ResultItem, SerpFeature, API_VERSION,
+    DEFAULT_QUERY_LIMIT,
 };
-use crate::server::state::AppState;
-use crate::compat::{convert_envelope_to_serper, convert_envelope_to_serpapi, SerpApiParams, SerperRequest};
 use crate::jobs::types::BatchRankRequest;
 use crate::rank::{probe_engine_rank, DeviceType, DomainMatchMode, RankRequest, RankStrategy};
+use crate::server::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQueryParams {
@@ -160,7 +162,10 @@ fn build_query(params: &SearchQueryParams, headers: &HeaderMap) -> Query {
         features: params.features.unwrap_or(true),
         extract: params.extract.unwrap_or(false),
         extract_top: params.extract_top.unwrap_or(1),
-        extract_mode: params.extract_mode.clone().unwrap_or_else(|| "auto".to_string()),
+        extract_mode: params
+            .extract_mode
+            .clone()
+            .unwrap_or_else(|| "auto".to_string()),
         extract_min_runes: params.min_runes.unwrap_or(0),
         proxy_url,
         proxy_country,
@@ -377,6 +382,9 @@ pub async fn search_single_handler(
 ) -> Response {
     let normalized_engine = match engine_name.to_lowercase().as_str() {
         "ddg" | "duck" => "duckduckgo".to_string(),
+        "hn" => "hackernews".to_string(),
+        "gh" => "github".to_string(),
+        "wiki" => "wikipedia".to_string(),
         n => n.to_string(),
     };
 
@@ -423,13 +431,15 @@ pub async fn search_single_handler(
 
     let mut effective_query = query.clone();
     if effective_query.proxy_url.is_none() {
-        let country_hint = effective_query.proxy_country.as_deref().or(
-            if !effective_query.region.is_empty() {
-                Some(effective_query.region.as_str())
-            } else {
-                None
-            }
-        );
+        let country_hint =
+            effective_query
+                .proxy_country
+                .as_deref()
+                .or(if !effective_query.region.is_empty() {
+                    Some(effective_query.region.as_str())
+                } else {
+                    None
+                });
         effective_query.proxy_url = state
             .proxy_manager
             .resolve_proxy(Some(&normalized_engine), None, country_hint)
@@ -456,7 +466,12 @@ pub async fn search_single_handler(
     };
 
     let took_ms = start_time.elapsed().as_millis() as i64;
-    let mut env = Envelope::new(&effective_query, request_id, started_at, vec![normalized_engine.clone()]);
+    let mut env = Envelope::new(
+        &effective_query,
+        request_id,
+        started_at,
+        vec![normalized_engine.clone()],
+    );
     env.meta.took_ms = took_ms;
     env.meta.engines_responded = vec![normalized_engine.clone()];
 
@@ -473,13 +488,19 @@ pub async fn search_single_handler(
 
     if effective_query.extract {
         let extract_count = effective_query.extract_top.min(enriched_results.len());
-        let lane_key = effective_query.proxy_session_id.as_ref().map(|sid| {
-            crate::core::proxy::ProxyLaneKey::new("default", &normalized_engine, sid)
-        });
+        let lane_key = effective_query
+            .proxy_session_id
+            .as_ref()
+            .map(|sid| crate::core::proxy::ProxyLaneKey::new("default", &normalized_engine, sid));
         for item in enriched_results.iter_mut().take(extract_count) {
             if let Ok(content) = state
                 .extractor
-                .extract_with_options(&item.url, true, effective_query.proxy_url.as_deref(), lane_key.as_ref())
+                .extract_with_options(
+                    &item.url,
+                    true,
+                    effective_query.proxy_url.as_deref(),
+                    lane_key.as_ref(),
+                )
                 .await
             {
                 item.extracted = Some(content);
@@ -603,7 +624,13 @@ pub async fn mega_search_handler(
         .engines
         .as_deref()
         .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
-        .unwrap_or_else(|| vec!["google".to_string(), "bing".to_string(), "duckduckgo".to_string()]);
+        .unwrap_or_else(|| {
+            vec![
+                "google".to_string(),
+                "bing".to_string(),
+                "duckduckgo".to_string(),
+            ]
+        });
 
     let mode = params.mode.as_deref().unwrap_or("balanced");
     let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
@@ -698,14 +725,18 @@ pub async fn extract_handler(
         .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
         .await;
 
-    let lane_key = proxy_session_id.map(|sid| {
-        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
-    });
+    let lane_key =
+        proxy_session_id.map(|sid| crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid));
 
     let use_llms_txt = params.use_llms_txt.unwrap_or(false);
     match state
         .extractor
-        .extract_with_options(&url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+        .extract_with_options(
+            &url,
+            use_llms_txt,
+            resolved_proxy.as_deref(),
+            lane_key.as_ref(),
+        )
         .await
     {
         Ok(content) => {
@@ -766,14 +797,18 @@ pub async fn extract_post_handler(
         .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
         .await;
 
-    let lane_key = proxy_session_id.map(|sid| {
-        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
-    });
+    let lane_key =
+        proxy_session_id.map(|sid| crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid));
 
     let use_llms_txt = payload.use_llms_txt.unwrap_or(false);
     match state
         .extractor
-        .extract_with_options(&payload.url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+        .extract_with_options(
+            &payload.url,
+            use_llms_txt,
+            resolved_proxy.as_deref(),
+            lane_key.as_ref(),
+        )
         .await
     {
         Ok(content) => (
@@ -822,9 +857,8 @@ pub async fn extract_batch_handler(
         .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
         .await;
 
-    let lane_key = proxy_session_id.map(|sid| {
-        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
-    });
+    let lane_key =
+        proxy_session_id.map(|sid| crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid));
 
     let use_llms_txt = payload.use_llms_txt.unwrap_or(false);
     let mut items = Vec::new();
@@ -832,7 +866,12 @@ pub async fn extract_batch_handler(
     for url in &payload.urls {
         match state
             .extractor
-            .extract_with_options(url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+            .extract_with_options(
+                url,
+                use_llms_txt,
+                resolved_proxy.as_deref(),
+                lane_key.as_ref(),
+            )
             .await
         {
             Ok(content) => {
@@ -864,6 +903,21 @@ pub async fn extract_batch_handler(
         serde_json::to_string(&items).unwrap_or_default(),
     )
         .into_response()
+}
+
+pub async fn crawl_post_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<crate::crawl::CrawlOptions>,
+) -> Response {
+    match state.crawler.crawl(payload).await {
+        Ok(result) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string_pretty(&result).unwrap_or_default(),
+        )
+            .into_response(),
+        Err(e) => error_response(e),
+    }
 }
 
 pub async fn parse_google_handler(body: String) -> Response {
@@ -1097,7 +1151,8 @@ pub async fn serpapi_search_handler(
         for feat in &raw.features {
             env.serp_features.push(feat.clone());
         }
-        env.results.push(enrich_result(raw, &norm_engine, query.start));
+        env.results
+            .push(enrich_result(raw, &norm_engine, query.start));
     }
 
     let serpapi_res = convert_envelope_to_serpapi(&env, &params);
@@ -1262,7 +1317,11 @@ pub async fn suggest_handler(
     let lang = params.lang.as_deref().unwrap_or("en");
     let region = params.region.as_deref().unwrap_or("us");
 
-    match state.suggest.suggest(&engine_name, &q_text, lang, region).await {
+    match state
+        .suggest
+        .suggest(&engine_name, &q_text, lang, region)
+        .await
+    {
         Ok(resp) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
@@ -1345,4 +1404,3 @@ pub async fn job_status_handler(
             .into_response(),
     }
 }
-

@@ -27,6 +27,7 @@ pub struct AppState {
     pub lane_store: Arc<LaneStore>,
     pub captcha_solver: Arc<CaptchaSolver>,
     pub circuit_breaker_manager: Arc<CircuitBreakerManager>,
+    pub crawler: Arc<crate::crawl::Crawler>,
 }
 
 impl AppState {
@@ -90,6 +91,11 @@ impl AppState {
         };
         let circuit_breaker_manager = Arc::new(CircuitBreakerManager::new(cb_cfg));
 
+        let crawler = Arc::new(crate::crawl::Crawler::new(
+            http_client.clone(),
+            extractor.clone(),
+        ));
+
         Self {
             config: Arc::new(config),
             http_client,
@@ -103,6 +109,7 @@ impl AppState {
             lane_store,
             captcha_solver,
             circuit_breaker_manager,
+            crawler,
         }
     }
 }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::core::http_client::HttpClient;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestResponse {
@@ -40,14 +40,10 @@ impl SuggestClient {
                 "https://api.bing.com/osjson.aspx?query={}&market={}",
                 encoded_q, gl
             ),
-            "duckduckgo" | "ddg" | "duck" => format!(
-                "https://duckduckgo.com/ac/?q={}&type=list",
-                encoded_q
-            ),
-            "ecosia" => format!(
-                "https://ac.ecosia.org/?q={}&type=list",
-                encoded_q
-            ),
+            "duckduckgo" | "ddg" | "duck" => {
+                format!("https://duckduckgo.com/ac/?q={}&type=list", encoded_q)
+            }
+            "ecosia" => format!("https://ac.ecosia.org/?q={}&type=list", encoded_q),
             _ => format!(
                 "https://suggestqueries.google.com/complete/search?client=chrome&q={}&hl={}&gl={}",
                 encoded_q, hl, gl
@@ -96,6 +92,9 @@ mod tests {
     fn test_parse_opensearch_suggestions() {
         let sample = r#"["rust", ["rust programming", "rust download", "rust language"]]"#;
         let res = parse_opensearch_suggestions(sample);
-        assert_eq!(res, vec!["rust programming", "rust download", "rust language"]);
+        assert_eq!(
+            res,
+            vec!["rust programming", "rust download", "rust language"]
+        );
     }
 }

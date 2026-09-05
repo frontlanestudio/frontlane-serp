@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -49,16 +49,14 @@ impl ProxyEntry {
     }
 
     pub fn matches_tag(&self, target_tag: &str) -> bool {
-        self.tags
-            .iter()
-            .any(|t| t.eq_ignore_ascii_case(target_tag))
+        self.tags.iter().any(|t| t.eq_ignore_ascii_case(target_tag))
     }
 
     pub fn matches_country(&self, country: &str) -> bool {
         let country_prefix = format!("country:{}", country);
-        self.tags.iter().any(|t| {
-            t.eq_ignore_ascii_case(country) || t.eq_ignore_ascii_case(&country_prefix)
-        })
+        self.tags
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(country) || t.eq_ignore_ascii_case(&country_prefix))
     }
 }
 
@@ -82,7 +80,11 @@ impl ProxyManager {
         failure_threshold: usize,
         allow_request_proxy_url: bool,
     ) -> Self {
-        let failure_threshold = if failure_threshold == 0 { 3 } else { failure_threshold };
+        let failure_threshold = if failure_threshold == 0 {
+            3
+        } else {
+            failure_threshold
+        };
         let entries = entries
             .into_iter()
             .map(|(url, tags)| ProxyEntry::new(url, tags))
@@ -168,11 +170,8 @@ impl ProxyManager {
         }
 
         // 6. Any healthy proxy (preferring non-challenged)
-        let healthy_candidates: Vec<&ProxyEntry> = state
-            .entries
-            .iter()
-            .filter(|e| e.healthy)
-            .collect();
+        let healthy_candidates: Vec<&ProxyEntry> =
+            state.entries.iter().filter(|e| e.healthy).collect();
 
         if !healthy_candidates.is_empty() {
             if let Some(unchallenged) = healthy_candidates.iter().find(|e| !e.is_challenged()) {
@@ -209,7 +208,8 @@ impl ProxyManager {
         for entry in &mut state.entries {
             if entry.url == proxy_url {
                 entry.consecutive_challenges += 1;
-                entry.challenged_until = Some(Utc::now() + Duration::seconds(PROXY_CHALLENGE_COOLDOWN_SECS));
+                entry.challenged_until =
+                    Some(Utc::now() + Duration::seconds(PROXY_CHALLENGE_COOLDOWN_SECS));
             }
         }
     }
@@ -313,7 +313,11 @@ impl LaneStore {
     pub fn new(max_lanes: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
-            max_lanes: if max_lanes == 0 { DEFAULT_MAX_LANES } else { max_lanes },
+            max_lanes: if max_lanes == 0 {
+                DEFAULT_MAX_LANES
+            } else {
+                max_lanes
+            },
         }
     }
 
@@ -369,11 +373,7 @@ impl LaneStore {
         None
     }
 
-    pub async fn set_clearance(
-        &self,
-        key: &ProxyLaneKey,
-        clearance: CloudflareClearance,
-    ) {
+    pub async fn set_clearance(&self, key: &ProxyLaneKey, clearance: CloudflareClearance) {
         let mut map = self.inner.lock().await;
         if let Some(lane) = map.get_mut(key) {
             lane.clearances.insert(clearance.domain.clone(), clearance);
@@ -405,9 +405,18 @@ mod tests {
     #[tokio::test]
     async fn test_geo_targeted_proxy_routing() {
         let entries = vec![
-            ("http://proxy-us:8080".to_string(), vec!["us".to_string(), "residential".to_string()]),
-            ("http://proxy-de:8080".to_string(), vec!["country:de".to_string(), "datacenter".to_string()]),
-            ("http://proxy-default:8080".to_string(), vec!["default".to_string()]),
+            (
+                "http://proxy-us:8080".to_string(),
+                vec!["us".to_string(), "residential".to_string()],
+            ),
+            (
+                "http://proxy-de:8080".to_string(),
+                vec!["country:de".to_string(), "datacenter".to_string()],
+            ),
+            (
+                "http://proxy-default:8080".to_string(),
+                vec!["default".to_string()],
+            ),
         ];
 
         let pm = ProxyManager::new(None, entries, 3, false);
@@ -448,7 +457,11 @@ mod tests {
         let key = ProxyLaneKey::new("tenant1", "google", "session123");
 
         let lane = store
-            .get_or_create_lane(key.clone(), Some("http://proxy:8080".to_string()), "Custom UA".to_string())
+            .get_or_create_lane(
+                key.clone(),
+                Some("http://proxy:8080".to_string()),
+                "Custom UA".to_string(),
+            )
             .await;
         assert_eq!(lane.user_agent, "Custom UA");
 
@@ -466,7 +479,12 @@ mod tests {
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().cf_clearance, "cf_clearance_abc");
 
-        store.drop_clearance_on_challenge(&key, "protected-shop.com").await;
-        assert!(store.get_clearance(&key, "protected-shop.com").await.is_none());
+        store
+            .drop_clearance_on_challenge(&key, "protected-shop.com")
+            .await;
+        assert!(store
+            .get_clearance(&key, "protected-shop.com")
+            .await
+            .is_none());
     }
 }

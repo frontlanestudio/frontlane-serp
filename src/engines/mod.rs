@@ -1,13 +1,21 @@
 pub mod baidu;
 pub mod bing;
+pub mod crates;
 pub mod duckduckgo;
 pub mod ecosia;
+pub mod github;
 pub mod google;
+pub mod hackernews;
+pub mod wikipedia;
 pub mod yandex;
 
 pub use baidu::Baidu;
 pub use bing::Bing;
+pub use crates::CratesIo;
 pub use duckduckgo::DuckDuckGo;
 pub use ecosia::Ecosia;
+pub use github::GitHub;
 pub use google::Google;
+pub use hackernews::HackerNews;
+pub use wikipedia::Wikipedia;
 pub use yandex::Yandex;

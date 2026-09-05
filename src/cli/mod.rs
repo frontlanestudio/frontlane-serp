@@ -72,7 +72,7 @@ pub enum CliFormat {
 
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Search engine: google, bing, duckduckgo (or ddg, duck), yandex, baidu, ecosia, mega
+    /// Search engine: google, bing, duckduckgo (or ddg, duck), yandex, baidu, ecosia, hackernews (hn), github (gh), crates, wikipedia (wiki), mega
     pub engine: String,
 
     /// Query text

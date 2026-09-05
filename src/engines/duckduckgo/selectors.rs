@@ -32,12 +32,7 @@ pub const RESULTS: &[&str] = &[
     ".result.results_links",
 ];
 
-pub const TITLE: &[&str] = &[
-    "h2",
-    ".result__title",
-    ".result__a",
-    ".result-title",
-];
+pub const TITLE: &[&str] = &["h2", ".result__title", ".result__a", ".result-title"];
 
 pub const DESC: &[&str] = &[
     "div[data-result='snippet']",
@@ -65,11 +60,7 @@ pub const AD_BADGE: &[&str] = &[
     ".badge--ad",
 ];
 
-pub const IMAGE_RESULT: &[&str] = &[
-    "figure[data-testid='image-result']",
-    "figure",
-    ".tile--img",
-];
+pub const IMAGE_RESULT: &[&str] = &["figure[data-testid='image-result']", "figure", ".tile--img"];
 
 pub const IMAGE_IMG: &[&str] = &["img"];
 
@@ -79,7 +70,4 @@ pub const IMAGE_TITLE: &[&str] = &[
     ".tile--img__title",
 ];
 
-pub const IMAGE_LINK: &[&str] = &[
-    "figcaption a",
-    "a",
-];
+pub const IMAGE_LINK: &[&str] = &["figcaption a", "a"];

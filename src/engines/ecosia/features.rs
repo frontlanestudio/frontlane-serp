@@ -1,6 +1,6 @@
-use scraper::Html;
 use crate::core::feature_selectors::{extract_serp_features_by_selectors, SerpFeatureSelector};
 use crate::core::types::{ResultType, SerpFeature};
+use scraper::Html;
 
 const ECOSIA_FEATURE_SPECS: &[SerpFeatureSelector] = &[
     SerpFeatureSelector {

@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use scraper::{ElementRef, Html, Selector};
+use std::collections::HashSet;
 
 use crate::core::types::{FeatureItem, FeatureLink, Position, ResultType, SerpFeature};
 
@@ -100,15 +100,17 @@ pub fn deduplicate_serp_features(features: Vec<SerpFeature>) -> Vec<SerpFeature>
 }
 
 fn serp_feature_key(f: &SerpFeature) -> String {
-    let first_link = f
-        .links
-        .first()
-        .and_then(|l| l.url.as_deref())
-        .unwrap_or("");
+    let first_link = f.links.first().and_then(|l| l.url.as_deref()).unwrap_or("");
     let first_item = f
         .items
         .first()
-        .map(|it| format!("{}|{}", it.text.as_deref().unwrap_or(""), it.link.as_deref().unwrap_or("")))
+        .map(|it| {
+            format!(
+                "{}|{}",
+                it.text.as_deref().unwrap_or(""),
+                it.link.as_deref().unwrap_or("")
+            )
+        })
         .unwrap_or_default();
 
     format!(
@@ -249,4 +251,3 @@ pub fn attach_features_to_results(
     results[0].features.extend(features);
     results
 }
-

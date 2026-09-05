@@ -114,9 +114,8 @@ pub async fn validate_public_url(raw_url: &str) -> Result<Url> {
         return Err(SerpError::InvalidParam("URL cannot be empty".to_string()));
     }
 
-    let parsed = Url::parse(trimmed).map_err(|e| {
-        SerpError::InvalidParam(format!("Invalid URL format: {}", e))
-    })?;
+    let parsed = Url::parse(trimmed)
+        .map_err(|e| SerpError::InvalidParam(format!("Invalid URL format: {}", e)))?;
 
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err(SerpError::InvalidParam(format!(
@@ -153,7 +152,8 @@ pub async fn validate_public_url(raw_url: &str) -> Result<Url> {
                 if !is_public_ip(addr.ip()) {
                     return Err(SerpError::Blocked(format!(
                         "Target host '{}' resolves to non-public IP: {}",
-                        host, addr.ip()
+                        host,
+                        addr.ip()
                     )));
                 }
             }

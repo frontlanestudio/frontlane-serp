@@ -3,10 +3,7 @@ pub const CAPTCHA_MARKERS: &[&str] = &[
     "verify that you are not a robot",
     "enter the characters you see",
 ];
-pub const NO_RESULTS_MARKERS: &[&str] = &[
-    "there are no results for",
-    "no results found for",
-];
+pub const NO_RESULTS_MARKERS: &[&str] = &["there are no results for", "no results found for"];
 pub const RESULT_ITEMS: &str = "#b_results > li.b_algo, #b_results > li.b_ad, li.b_algo, li.b_ad";
 pub const RESULTS: &str = "li.b_algo";
 pub const ADS: &str = "li.b_ad";

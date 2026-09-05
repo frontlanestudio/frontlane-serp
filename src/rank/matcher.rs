@@ -1,5 +1,5 @@
-use url::Url;
 use crate::rank::types::DomainMatchMode;
+use url::Url;
 
 pub fn normalize_domain_or_url(input: &str) -> (String, String) {
     let raw = input.trim();
@@ -40,7 +40,8 @@ pub fn matches_target(candidate_url: &str, target: &str, mode: DomainMatchMode) 
             }
         }
         DomainMatchMode::Subdomain => {
-            let host_matches = cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host));
+            let host_matches =
+                cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host));
             if !host_matches {
                 return false;
             }
@@ -67,16 +68,44 @@ mod tests {
 
     #[test]
     fn test_matches_target_subdomain() {
-        assert!(matches_target("https://example.com", "example.com", DomainMatchMode::Subdomain));
-        assert!(matches_target("https://www.example.com", "example.com", DomainMatchMode::Subdomain));
-        assert!(matches_target("https://blog.example.com/post", "example.com", DomainMatchMode::Subdomain));
-        assert!(matches_target("https://sub.blog.example.com/post", "example.com", DomainMatchMode::Subdomain));
-        assert!(!matches_target("https://another-example.com", "example.com", DomainMatchMode::Subdomain));
+        assert!(matches_target(
+            "https://example.com",
+            "example.com",
+            DomainMatchMode::Subdomain
+        ));
+        assert!(matches_target(
+            "https://www.example.com",
+            "example.com",
+            DomainMatchMode::Subdomain
+        ));
+        assert!(matches_target(
+            "https://blog.example.com/post",
+            "example.com",
+            DomainMatchMode::Subdomain
+        ));
+        assert!(matches_target(
+            "https://sub.blog.example.com/post",
+            "example.com",
+            DomainMatchMode::Subdomain
+        ));
+        assert!(!matches_target(
+            "https://another-example.com",
+            "example.com",
+            DomainMatchMode::Subdomain
+        ));
     }
 
     #[test]
     fn test_matches_target_exact() {
-        assert!(matches_target("https://example.com/page", "example.com/page", DomainMatchMode::Exact));
-        assert!(!matches_target("https://blog.example.com/page", "example.com/page", DomainMatchMode::Exact));
+        assert!(matches_target(
+            "https://example.com/page",
+            "example.com/page",
+            DomainMatchMode::Exact
+        ));
+        assert!(!matches_target(
+            "https://blog.example.com/page",
+            "example.com/page",
+            DomainMatchMode::Exact
+        ));
     }
 }

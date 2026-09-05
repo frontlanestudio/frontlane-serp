@@ -100,12 +100,35 @@ pub struct RegionTarget {
 
 fn yandex_lr_for_country(country: &str) -> &'static str {
     match country {
-        "AT" => "113", "AU" => "211", "BE" => "114", "BR" => "94", "CA" => "95",
-        "CH" => "126", "DE" => "96", "DK" => "203", "ES" => "204", "FI" => "123",
-        "FR" => "124", "GB" => "102", "IE" => "10063", "IN" => "994", "IT" => "205",
-        "JP" => "137", "KR" => "135", "MX" => "20271", "NL" => "118", "NO" => "119",
-        "PL" => "120", "RU" => "225", "SE" => "127", "SG" => "10105", "TR" => "983",
-        "UA" => "187", "UK" => "102", "US" => "84", "ZA" => "10021",
+        "AT" => "113",
+        "AU" => "211",
+        "BE" => "114",
+        "BR" => "94",
+        "CA" => "95",
+        "CH" => "126",
+        "DE" => "96",
+        "DK" => "203",
+        "ES" => "204",
+        "FI" => "123",
+        "FR" => "124",
+        "GB" => "102",
+        "IE" => "10063",
+        "IN" => "994",
+        "IT" => "205",
+        "JP" => "137",
+        "KR" => "135",
+        "MX" => "20271",
+        "NL" => "118",
+        "NO" => "119",
+        "PL" => "120",
+        "RU" => "225",
+        "SE" => "127",
+        "SG" => "10105",
+        "TR" => "983",
+        "UA" => "187",
+        "UK" => "102",
+        "US" => "84",
+        "ZA" => "10021",
         _ => "",
     }
 }
@@ -212,7 +235,8 @@ pub fn resolve_region(region: &str) -> RegionTarget {
 }
 
 const GOOGLE_UULE_PREFIX: &str = "w+CAIQICI";
-const GOOGLE_UULE_LENGTH_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const GOOGLE_UULE_LENGTH_ALPHABET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 pub fn encode_google_uule(canonical: &str) -> String {
     let len = canonical.chars().count();

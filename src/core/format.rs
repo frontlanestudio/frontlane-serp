@@ -67,7 +67,11 @@ pub fn render_markdown(env: &Envelope) -> String {
         b.push_str("## Features\n\n");
         for f in &env.serp_features {
             let title = f.title.as_deref().unwrap_or("Feature");
-            b.push_str(&format!("### {:?}: {}\n\n", f.feature_type, escape_markdown(title)));
+            b.push_str(&format!(
+                "### {:?}: {}\n\n",
+                f.feature_type,
+                escape_markdown(title)
+            ));
             if let Some(ref text) = f.text {
                 b.push_str(&format!("{}\n\n", text));
             }
@@ -179,7 +183,6 @@ pub fn render_text(env: &Envelope) -> String {
 
     b
 }
-
 
 pub fn render_text_image(env: &ImageEnvelope) -> String {
     let mut b = String::new();

@@ -1,6 +1,6 @@
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::core::engine::SearchEngine;
@@ -16,14 +16,14 @@ pub fn get_available_tools() -> Vec<McpTool> {
     vec![
         McpTool {
             name: "serp_search".to_string(),
-            description: "Search Google, Bing, DuckDuckGo, Baidu, Yandex, or Ecosia and return structured results."
+            description: "Search Google, Bing, DuckDuckGo, Baidu, Yandex, Ecosia, HackerNews, GitHub, Crates.io, or Wikipedia and return structured results."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "engine": {
                         "type": "string",
-                        "description": "Search engine: google, bing, duckduckgo, yandex, baidu, ecosia",
+                        "description": "Search engine: google, bing, duckduckgo, yandex, baidu, ecosia, hackernews, github, crates, wikipedia",
                         "default": "google"
                     },
                     "query": { "type": "string", "description": "Search query keywords" },
@@ -69,7 +69,7 @@ pub fn get_available_tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "extract_content".to_string(),
-            description: "Extract clean, reader-friendly markdown content and metadata from any web page URL or llms.txt."
+            description: "Extract clean, reader-friendly markdown content, JSON-LD schemas, and metadata from any web page URL or llms.txt."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -82,7 +82,7 @@ pub fn get_available_tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "mega_search".to_string(),
-            description: "Perform aggregated multi-engine search across multiple engines with result deduplication and clustering."
+            description: "Perform aggregated multi-engine search across multiple engines with Reciprocal Rank Fusion (RRF) scoring, consensus metrics, and clustering."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -95,6 +95,26 @@ pub fn get_available_tools() -> Vec<McpTool> {
                 "required": ["query"]
             }),
         },
+        McpTool {
+            name: "crawl_site".to_string(),
+            description: "Asynchronously crawl a website starting from a URL with depth/page limits, domain boundary filtering, and robots.txt politeness."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Starting URL to crawl" },
+                    "max_depth": { "type": "integer", "description": "Maximum crawl depth (1-5)", "default": 2 },
+                    "max_pages": { "type": "integer", "description": "Maximum pages to crawl (1-50)", "default": 10 },
+                    "allowed_domains": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional domain filter (defaults to starting URL host)"
+                    },
+                    "respect_robots": { "type": "boolean", "description": "Respect robots.txt rules", "default": true }
+                },
+                "required": ["url"]
+            }),
+        },
     ]
 }
 
@@ -105,14 +125,27 @@ pub async fn handle_tool_call(
     mega: &Arc<MegaSearcher>,
     extractor: &Arc<Extractor>,
     suggest: &SuggestClient,
+    crawler: &Arc<crate::crawl::Crawler>,
 ) -> McpToolCallResult {
     match name {
         "serp_search" => {
-            let engine_name = args.get("engine").and_then(|v| v.as_str()).unwrap_or("google").to_lowercase();
+            let engine_name = args
+                .get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("google")
+                .to_lowercase();
             let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-            let region = args.get("region").and_then(|v| v.as_str()).unwrap_or("US").to_string();
-            let lang = args.get("lang").and_then(|v| v.as_str()).unwrap_or("en").to_string();
+            let region = args
+                .get("region")
+                .and_then(|v| v.as_str())
+                .unwrap_or("US")
+                .to_string();
+            let lang = args
+                .get("lang")
+                .and_then(|v| v.as_str())
+                .unwrap_or("en")
+                .to_string();
 
             let norm_engine = match engine_name.as_str() {
                 "ddg" | "duck" => "duckduckgo",
@@ -184,11 +217,24 @@ pub async fn handle_tool_call(
         "check_rank" => {
             let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("");
             let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let engine_name = args.get("engine").and_then(|v| v.as_str()).unwrap_or("google").to_lowercase();
-            let strategy_str = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("smart");
+            let engine_name = args
+                .get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("google")
+                .to_lowercase();
+            let strategy_str = args
+                .get("strategy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("smart");
             let last_rank = args.get("last_rank").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let device_str = args.get("device").and_then(|v| v.as_str()).unwrap_or("desktop");
-            let match_str = args.get("match_mode").and_then(|v| v.as_str()).unwrap_or("subdomain");
+            let device_str = args
+                .get("device")
+                .and_then(|v| v.as_str())
+                .unwrap_or("desktop");
+            let match_str = args
+                .get("match_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("subdomain");
 
             let strategy = match strategy_str {
                 "basic" => RankStrategy::Basic,
@@ -255,7 +301,10 @@ pub async fn handle_tool_call(
         }
         "suggest_keywords" => {
             let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let engine_name = args.get("engine").and_then(|v| v.as_str()).unwrap_or("google");
+            let engine_name = args
+                .get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("google");
             let region = args.get("region").and_then(|v| v.as_str()).unwrap_or("us");
             let lang = args.get("lang").and_then(|v| v.as_str()).unwrap_or("en");
 
@@ -281,7 +330,10 @@ pub async fn handle_tool_call(
         }
         "extract_content" => {
             let target_url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            let llms_txt = args.get("llms_txt").and_then(|v| v.as_bool()).unwrap_or(true);
+            let llms_txt = args
+                .get("llms_txt")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
 
             match extractor.extract(target_url, llms_txt).await {
                 Ok(content) => {
@@ -306,13 +358,23 @@ pub async fn handle_tool_call(
         "mega_search" => {
             let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-            let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("balanced");
+            let mode = args
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("balanced");
 
-            let engines_list: Vec<String> = if let Some(arr) = args.get("engines").and_then(|v| v.as_array()) {
-                arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect()
-            } else {
-                vec!["google".to_string(), "bing".to_string(), "duckduckgo".to_string()]
-            };
+            let engines_list: Vec<String> =
+                if let Some(arr) = args.get("engines").and_then(|v| v.as_array()) {
+                    arr.iter()
+                        .filter_map(|e| e.as_str().map(|s| s.to_string()))
+                        .collect()
+                } else {
+                    vec![
+                        "google".to_string(),
+                        "bing".to_string(),
+                        "duckduckgo".to_string(),
+                    ]
+                };
 
             let q = Query {
                 text: query_text.to_string(),
@@ -359,6 +421,53 @@ pub async fn handle_tool_call(
                 },
             }
         }
+        "crawl_site" => {
+            let start_url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+            let max_pages = args.get("max_pages").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+            let respect_robots = args
+                .get("respect_robots")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let allowed_domains =
+                if let Some(arr) = args.get("allowed_domains").and_then(|v| v.as_array()) {
+                    arr.iter()
+                        .filter_map(|d| d.as_str().map(|s| s.to_string()))
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            let options = crate::crawl::CrawlOptions {
+                start_url: start_url.to_string(),
+                max_depth,
+                max_pages,
+                concurrency: 4,
+                allowed_domains,
+                respect_robots,
+                extract_content: true,
+            };
+
+            match crawler.crawl(options).await {
+                Ok(res) => {
+                    let json_out = serde_json::to_string_pretty(&res).unwrap_or_default();
+                    McpToolCallResult {
+                        content: vec![McpToolCallContent {
+                            r#type: "text".to_string(),
+                            text: json_out,
+                        }],
+                        is_error: false,
+                    }
+                }
+                Err(e) => McpToolCallResult {
+                    content: vec![McpToolCallContent {
+                        r#type: "text".to_string(),
+                        text: format!("Crawl error: {}", e),
+                    }],
+                    is_error: true,
+                },
+            }
+        }
         _ => McpToolCallResult {
             content: vec![McpToolCallContent {
                 r#type: "text".to_string(),
@@ -374,6 +483,7 @@ pub async fn run_stdio_mcp_server(
     mega: Arc<MegaSearcher>,
     extractor: Arc<Extractor>,
     suggest: SuggestClient,
+    crawler: Arc<crate::crawl::Crawler>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
@@ -434,13 +544,9 @@ pub async fn run_stdio_mcp_server(
                 let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
 
                 let call_res = handle_tool_call(
-                    tool_name,
-                    tool_args,
-                    &engines,
-                    &mega,
-                    &extractor,
-                    &suggest,
-                ).await;
+                    tool_name, tool_args, &engines, &mega, &extractor, &suggest, &crawler,
+                )
+                .await;
 
                 let resp = JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),

@@ -151,6 +151,10 @@ pub struct ExtractedContent {
     pub fetched_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub json_ld: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub meta_tags: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +238,12 @@ pub struct ResultItem {
     pub classification: Option<Classification>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extracted: Option<ExtractedContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_consensus: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engines: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,7 +353,12 @@ pub struct ImageEnvelope {
 }
 
 impl Envelope {
-    pub fn new(q: &Query, request_id: String, started_at: DateTime<Utc>, engines: Vec<String>) -> Self {
+    pub fn new(
+        q: &Query,
+        request_id: String,
+        started_at: DateTime<Utc>,
+        engines: Vec<String>,
+    ) -> Self {
         Self {
             query: QueryEcho {
                 text: q.text.clone(),

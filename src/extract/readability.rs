@@ -1,5 +1,5 @@
-use scraper::{Html, Selector};
 use crate::core::page_helpers::normalize_whitespace;
+use scraper::{Html, Selector};
 
 #[derive(Debug, Clone, Default)]
 pub struct ExtractedPage {
@@ -27,7 +27,8 @@ pub fn extract_page_content(html_str: &str) -> ExtractedPage {
     let language = extract_meta_attr(&document, "html", "lang").unwrap_or_default();
 
     // Prefer main, article, or body
-    let container_sel = Selector::parse("main, article, [role='main'], div#content, div.content, body").ok();
+    let container_sel =
+        Selector::parse("main, article, [role='main'], div#content, div.content, body").ok();
     let mut clean_html = String::new();
 
     if let Some(ref csel) = container_sel {

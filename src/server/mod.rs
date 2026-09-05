@@ -43,9 +43,10 @@ pub fn create_router(state: AppState) -> Router {
         // Raw HTML parsing
         .route("/google/parse", post(parse_google_handler))
         .route("/bing/parse", post(parse_bing_handler))
-        // Extraction
+        // Extraction & Crawl
         .route("/extract", get(extract_handler).post(extract_post_handler))
         .route("/extract/batch", post(extract_batch_handler))
+        .route("/crawl", post(crawl_post_handler))
         // Serper Compatibility
         .route("/v1/serper/search", post(serper_search_handler))
         .route("/serper/search", post(serper_search_handler))
@@ -53,7 +54,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/v1/serpapi/search", get(serpapi_search_handler))
         .route("/serpapi/search", get(serpapi_search_handler))
         // Rank & Smart Probing
-        .route("/{engine}/rank", get(rank_get_handler).post(rank_post_handler))
+        .route(
+            "/{engine}/rank",
+            get(rank_get_handler).post(rank_post_handler),
+        )
         // Autocomplete / Suggest
         .route("/{engine}/suggest", get(suggest_handler))
         // Asynchronous Batch Jobs

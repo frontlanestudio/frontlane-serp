@@ -1,13 +1,13 @@
-use std::collections::HashSet;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use md5::{Digest, Md5};
+use std::collections::HashSet;
 use url::Url;
 
 use crate::core::domain::{classify_url, enrich_domain_info, normalize_domain};
 use crate::core::types::{
-    ImageData, ImageResult, ImageSource,
-    Position, ResultItem, ResultType, SearchResult, SerpFeature,
+    ImageData, ImageResult, ImageSource, Position, ResultItem, ResultType, SearchResult,
+    SerpFeature,
 };
 
 pub const RESPONSE_ID_BYTES: usize = 8;
@@ -73,8 +73,16 @@ pub fn normalize_url(raw: &str) -> String {
     }
 
     let tracking_params: HashSet<&str> = [
-        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-        "fbclid", "gclid", "msclkid", "ref", "_ga",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "fbclid",
+        "gclid",
+        "msclkid",
+        "ref",
+        "_ga",
     ]
     .into_iter()
     .collect();
@@ -116,7 +124,9 @@ pub fn unwrap_bing_url(raw: &str) -> Option<String> {
         _ => {}
     }
     let standard = padded.replace('-', "+").replace('_', "/");
-    let decoded = base64::engine::general_purpose::STANDARD.decode(standard).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(standard)
+        .ok()?;
     let candidate = String::from_utf8(decoded).ok()?;
     if candidate.starts_with("http://") || candidate.starts_with("https://") {
         Some(candidate)
@@ -229,6 +239,9 @@ pub fn enrich_result(raw: SearchResult, engine: &str, start: usize) -> ResultIte
         domain_info,
         classification,
         extracted: None,
+        score: None,
+        engine_consensus: None,
+        engines: None,
     }
 }
 

@@ -1,7 +1,7 @@
-use async_trait::async_trait;
-use std::collections::HashSet;
 use crate::core::error::Result;
 use crate::core::types::{Query, SearchResult};
+use async_trait::async_trait;
+use std::collections::HashSet;
 
 #[async_trait]
 pub trait SearchEngine: Send + Sync {
@@ -52,8 +52,16 @@ pub fn deduplicate_results(mut results: Vec<SearchResult>) -> Vec<SearchResult> 
     }
 
     deduped.sort_by(|a, b| {
-        let pos_a = if a.absolute_rank > 0 { a.absolute_rank } else { a.rank.abs() };
-        let pos_b = if b.absolute_rank > 0 { b.absolute_rank } else { b.rank.abs() };
+        let pos_a = if a.absolute_rank > 0 {
+            a.absolute_rank
+        } else {
+            a.rank.abs()
+        };
+        let pos_b = if b.absolute_rank > 0 {
+            b.absolute_rank
+        } else {
+            b.rank.abs()
+        };
         pos_a
             .cmp(&pos_b)
             .then_with(|| a.ad.cmp(&b.ad))

@@ -1,9 +1,9 @@
-use scraper::{Html, Selector};
+use super::selectors::*;
 use crate::core::engine::deduplicate_results;
 use crate::core::error::Result;
 use crate::core::page_helpers::{classify_challenge_document, normalize_whitespace, DocSignals};
 use crate::core::types::{ImageData, ImageSource, ResultType, SearchResult};
-use super::selectors::*;
+use scraper::{Html, Selector};
 
 pub fn parse_html(html_str: &str) -> Result<Vec<SearchResult>> {
     let document = Html::parse_document(html_str);

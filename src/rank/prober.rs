@@ -7,7 +7,11 @@ use crate::core::types::{Query, ResultType, SerpFeature};
 use crate::rank::matcher::matches_target;
 use crate::rank::types::{DeviceType, RankRequest, RankResponse, RankStrategy};
 
-pub fn calculate_pages_to_probe(strategy: RankStrategy, last_rank: usize, limit: usize) -> Vec<usize> {
+pub fn calculate_pages_to_probe(
+    strategy: RankStrategy,
+    last_rank: usize,
+    limit: usize,
+) -> Vec<usize> {
     let max_pages = limit.clamp(1, 10);
     match strategy {
         RankStrategy::Basic => vec![1],
@@ -54,7 +58,10 @@ pub async fn probe_engine_rank(
         engine: &Arc<dyn SearchEngine>,
         req: &RankRequest,
         page: usize,
-    ) -> Result<(Vec<crate::core::types::ResultItem>, Vec<SerpFeature>), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        (Vec<crate::core::types::ResultItem>, Vec<SerpFeature>),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         let start = (page - 1) * 10;
         let q = Query {
             text: req.q.clone(),
@@ -214,10 +221,22 @@ mod tests {
     #[test]
     fn test_calculate_pages_to_probe() {
         assert_eq!(calculate_pages_to_probe(RankStrategy::Basic, 0, 5), vec![1]);
-        assert_eq!(calculate_pages_to_probe(RankStrategy::Custom, 0, 3), vec![1, 2, 3]);
+        assert_eq!(
+            calculate_pages_to_probe(RankStrategy::Custom, 0, 3),
+            vec![1, 2, 3]
+        );
         assert_eq!(calculate_pages_to_probe(RankStrategy::Smart, 0, 5), vec![1]);
-        assert_eq!(calculate_pages_to_probe(RankStrategy::Smart, 5, 5), vec![1, 2]); // page 1 -> neighbors [1, 2]
-        assert_eq!(calculate_pages_to_probe(RankStrategy::Smart, 24, 5), vec![2, 3, 4]); // pos 24 -> page 3 -> [2, 3, 4]
-        assert_eq!(calculate_pages_to_probe(RankStrategy::Smart, 45, 5), vec![4, 5]); // pos 45 -> page 5 -> [4, 5]
+        assert_eq!(
+            calculate_pages_to_probe(RankStrategy::Smart, 5, 5),
+            vec![1, 2]
+        ); // page 1 -> neighbors [1, 2]
+        assert_eq!(
+            calculate_pages_to_probe(RankStrategy::Smart, 24, 5),
+            vec![2, 3, 4]
+        ); // pos 24 -> page 3 -> [2, 3, 4]
+        assert_eq!(
+            calculate_pages_to_probe(RankStrategy::Smart, 45, 5),
+            vec![4, 5]
+        ); // pos 45 -> page 5 -> [4, 5]
     }
 }

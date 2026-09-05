@@ -1,12 +1,12 @@
 pub mod llmstxt;
 pub mod readability;
 
-use chrono::Utc;
 use crate::core::captcha::CaptchaSolver;
 use crate::core::error::Result;
 use crate::core::http_client::HttpClient;
 use crate::core::proxy::{LaneStore, ProxyLaneKey};
 use crate::core::types::ExtractedContent;
+use chrono::Utc;
 
 /// Detects whether an HTTP response is a Cloudflare JavaScript / Turnstile / Managed Challenge page.
 pub fn is_cloudflare_challenge(status: reqwest::StatusCode, body: &str) -> bool {
@@ -26,7 +26,8 @@ pub fn is_cloudflare_challenge(status: reqwest::StatusCode, body: &str) -> bool 
         || body_lower.contains("cf-alert")
         || body_lower.contains("please enable cookies");
 
-    is_challenge_status && has_challenge_marker || (has_challenge_marker && body_lower.contains("cloudflare"))
+    is_challenge_status && has_challenge_marker
+        || (has_challenge_marker && body_lower.contains("cloudflare"))
 }
 
 #[derive(Clone)]
@@ -58,7 +59,8 @@ impl Extractor {
     }
 
     pub async fn extract(&self, url: &str, use_llmstxt: bool) -> Result<ExtractedContent> {
-        self.extract_with_options(url, use_llmstxt, None, None).await
+        self.extract_with_options(url, use_llmstxt, None, None)
+            .await
     }
 
     pub async fn extract_with_options(
@@ -79,6 +81,8 @@ impl Extractor {
                 mode_used: Some("blocked".to_string()),
                 fetched_at: Some(now),
                 error: Some(e.to_string()),
+                json_ld: Vec::new(),
+                meta_tags: std::collections::HashMap::new(),
             });
         }
 
@@ -91,6 +95,8 @@ impl Extractor {
                     mode_used: Some("llmstxt".to_string()),
                     fetched_at: Some(now),
                     error: None,
+                    json_ld: Vec::new(),
+                    meta_tags: std::collections::HashMap::new(),
                 });
             }
         }
@@ -111,9 +117,7 @@ impl Extractor {
         let initial_cookie = existing_clearance
             .as_ref()
             .map(|c| format!("cf_clearance={}", c.cf_clearance));
-        let initial_ua = existing_clearance
-            .as_ref()
-            .map(|c| c.user_agent.as_str());
+        let initial_ua = existing_clearance.as_ref().map(|c| c.user_agent.as_str());
 
         // 2. Fetch raw page
         let (status, body) = match self
@@ -130,6 +134,8 @@ impl Extractor {
                     mode_used: Some("fast".to_string()),
                     fetched_at: Some(now),
                     error: Some(e.to_string()),
+                    json_ld: Vec::new(),
+                    meta_tags: std::collections::HashMap::new(),
                 });
             }
         };
@@ -162,16 +168,26 @@ impl Extractor {
                             {
                                 Ok((bypassed_status, bypassed_body)) => {
                                     if !is_cloudflare_challenge(bypassed_status, &bypassed_body)
-                                        && (bypassed_status.is_success() || bypassed_status.as_u16() == 200)
+                                        && (bypassed_status.is_success()
+                                            || bypassed_status.as_u16() == 200)
                                     {
-                                        let page = readability::extract_page_content(&bypassed_body);
+                                        let page =
+                                            readability::extract_page_content(&bypassed_body);
+                                        let (json_ld, meta_tags) =
+                                            extract_structured_metadata(&bypassed_body);
                                         return Ok(ExtractedContent {
-                                            title: if !page.title.is_empty() { Some(page.title) } else { None },
+                                            title: if !page.title.is_empty() {
+                                                Some(page.title)
+                                            } else {
+                                                None
+                                            },
                                             format: Some("markdown".to_string()),
                                             content: Some(page.markdown),
                                             mode_used: Some("fast+cf_clearance".to_string()),
                                             fetched_at: Some(now),
                                             error: None,
+                                            json_ld,
+                                            meta_tags,
                                         });
                                     }
                                 }
@@ -182,7 +198,12 @@ impl Extractor {
                                         content: None,
                                         mode_used: Some("fast+cf_clearance".to_string()),
                                         fetched_at: Some(now),
-                                        error: Some(format!("failed to fetch after challenge solve: {}", e)),
+                                        error: Some(format!(
+                                            "failed to fetch after challenge solve: {}",
+                                            e
+                                        )),
+                                        json_ld: Vec::new(),
+                                        meta_tags: std::collections::HashMap::new(),
                                     });
                                 }
                             }
@@ -195,6 +216,8 @@ impl Extractor {
                                 mode_used: Some("fast".to_string()),
                                 fetched_at: Some(now),
                                 error: Some(format!("cloudflare challenge solve failed: {}", e)),
+                                json_ld: Vec::new(),
+                                meta_tags: std::collections::HashMap::new(),
                             });
                         }
                     }
@@ -208,7 +231,12 @@ impl Extractor {
                 content: None,
                 mode_used: Some("fast".to_string()),
                 fetched_at: Some(now),
-                error: Some(format!("blocked by Cloudflare challenge (HTTP {})", status.as_u16())),
+                error: Some(format!(
+                    "blocked by Cloudflare challenge (HTTP {})",
+                    status.as_u16()
+                )),
+                json_ld: Vec::new(),
+                meta_tags: std::collections::HashMap::new(),
             });
         }
 
@@ -221,10 +249,13 @@ impl Extractor {
                 mode_used: Some("fast".to_string()),
                 fetched_at: Some(now),
                 error: Some(format!("HTTP status {}", status)),
+                json_ld: Vec::new(),
+                meta_tags: std::collections::HashMap::new(),
             });
         }
 
         let page = readability::extract_page_content(&body);
+        let (json_ld, meta_tags) = extract_structured_metadata(&body);
         let mode_used = if initial_cookie.is_some() {
             "fast+cached_clearance".to_string()
         } else {
@@ -232,21 +263,86 @@ impl Extractor {
         };
 
         Ok(ExtractedContent {
-            title: if !page.title.is_empty() { Some(page.title) } else { None },
+            title: if !page.title.is_empty() {
+                Some(page.title)
+            } else {
+                None
+            },
             format: Some("markdown".to_string()),
             content: Some(page.markdown),
             mode_used: Some(mode_used),
             fetched_at: Some(now),
             error: None,
+            json_ld,
+            meta_tags,
         })
     }
+}
+
+pub fn extract_structured_metadata(
+    html: &str,
+) -> (
+    Vec<serde_json::Value>,
+    std::collections::HashMap<String, String>,
+) {
+    let document = scraper::Html::parse_document(html);
+
+    // 1. JSON-LD scripts
+    let mut json_ld = Vec::new();
+    if let Ok(script_sel) = scraper::Selector::parse(r#"script[type="application/ld+json"]"#) {
+        for el in document.select(&script_sel) {
+            let raw_text = el.text().collect::<Vec<_>>().join("");
+            let trimmed = raw_text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if let serde_json::Value::Array(arr) = val {
+                    json_ld.extend(arr);
+                } else {
+                    json_ld.push(val);
+                }
+            }
+        }
+    }
+
+    // 2. OpenGraph, Twitter, and standard meta tags
+    let mut meta_tags = std::collections::HashMap::new();
+    if let Ok(meta_sel) = scraper::Selector::parse("meta") {
+        for el in document.select(&meta_sel) {
+            let key = el
+                .value()
+                .attr("property")
+                .or_else(|| el.value().attr("name"))
+                .or_else(|| el.value().attr("itemprop"));
+            let content = el.value().attr("content");
+            if let (Some(k), Some(c)) = (key, content) {
+                let k_norm = k.trim().to_lowercase();
+                let c_trimmed = c.trim().to_string();
+                if !k_norm.is_empty()
+                    && !c_trimmed.is_empty()
+                    && (k_norm.starts_with("og:")
+                        || k_norm.starts_with("twitter:")
+                        || k_norm == "description"
+                        || k_norm == "keywords"
+                        || k_norm == "author"
+                        || k_norm == "article:published_time"
+                        || k_norm == "article:author")
+                {
+                    meta_tags.entry(k_norm).or_insert(c_trimmed);
+                }
+            }
+        }
+    }
+
+    (json_ld, meta_tags)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
     use crate::core::captcha::{CaptchaSolverConfig, CloudflareClearance};
+    use reqwest::StatusCode;
 
     #[test]
     fn test_detect_cloudflare_challenge() {
@@ -264,7 +360,10 @@ mod tests {
         "#;
 
         assert!(is_cloudflare_challenge(StatusCode::FORBIDDEN, cf_html));
-        assert!(is_cloudflare_challenge(StatusCode::SERVICE_UNAVAILABLE, cf_html));
+        assert!(is_cloudflare_challenge(
+            StatusCode::SERVICE_UNAVAILABLE,
+            cf_html
+        ));
 
         let normal_html = r#"
             <!DOCTYPE html>
@@ -289,20 +388,68 @@ mod tests {
             None,
         );
 
-        let solver = CaptchaSolver::new(CaptchaSolverConfig::default())
-            .with_mock_solution(mock_clearance);
+        let solver =
+            CaptchaSolver::new(CaptchaSolverConfig::default()).with_mock_solution(mock_clearance);
         let lane_store = LaneStore::new(10);
 
-        let extractor = Extractor::with_solver_and_lanes(
-            http_client,
-            Some(solver),
-            Some(lane_store.clone()),
-        );
+        let extractor =
+            Extractor::with_solver_and_lanes(http_client, Some(solver), Some(lane_store.clone()));
 
         let key = ProxyLaneKey::new("default", "extract", "test-session");
         assert_eq!(key.session_id, "test-session");
         // Test that extractor initializes correctly and stores lanes
         assert!(extractor.solver.is_some());
         assert!(extractor.lane_store.is_some());
+    }
+
+    #[test]
+    fn test_extract_structured_metadata() {
+        let sample_html = r#"
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Rust Web Development</title>
+                <meta property="og:title" content="Rust Web Development Guide" />
+                <meta property="og:description" content="A comprehensive guide to async web apps in Rust." />
+                <meta property="og:type" content="article" />
+                <meta name="twitter:card" content="summary_large_image" />
+                <meta name="author" content="Brandon Hubbard" />
+                <script type="application/ld+json">
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Article",
+                    "headline": "Rust Web Development Guide",
+                    "author": {
+                        "@type": "Person",
+                        "name": "Brandon Hubbard"
+                    }
+                }
+                </script>
+            </head>
+            <body>
+                <article><h1>Rust Web Development Guide</h1><p>Content goes here.</p></article>
+            </body>
+            </html>
+        "#;
+
+        let (json_ld, meta_tags) = extract_structured_metadata(sample_html);
+        assert_eq!(json_ld.len(), 1);
+        assert_eq!(json_ld[0]["@type"], "Article");
+        assert_eq!(json_ld[0]["headline"], "Rust Web Development Guide");
+
+        assert_eq!(
+            meta_tags.get("og:title").unwrap(),
+            "Rust Web Development Guide"
+        );
+        assert_eq!(
+            meta_tags.get("og:description").unwrap(),
+            "A comprehensive guide to async web apps in Rust."
+        );
+        assert_eq!(meta_tags.get("og:type").unwrap(), "article");
+        assert_eq!(
+            meta_tags.get("twitter:card").unwrap(),
+            "summary_large_image"
+        );
+        assert_eq!(meta_tags.get("author").unwrap(), "Brandon Hubbard");
     }
 }

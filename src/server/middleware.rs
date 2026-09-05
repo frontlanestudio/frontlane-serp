@@ -1,9 +1,5 @@
-use axum::{
-    extract::Request,
-    middleware::Next,
-    response::Response,
-};
 use axum::http::HeaderValue;
+use axum::{extract::Request, middleware::Next, response::Response};
 use tracing::info;
 use uuid::Uuid;
 

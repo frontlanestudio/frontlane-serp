@@ -163,7 +163,12 @@ async fn test_server_stats_routes() {
     // 1. Test /stats
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/stats").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/stats")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -177,7 +182,12 @@ async fn test_server_stats_routes() {
     // 2. Test /stats/cache
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/stats/cache").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/stats/cache")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -188,7 +198,12 @@ async fn test_server_stats_routes() {
     // 3. Test /stats/proxy
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/stats/proxy").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/stats/proxy")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -199,11 +214,48 @@ async fn test_server_stats_routes() {
 
     // 4. Test /stats/cb
     let response = app
-        .oneshot(Request::builder().uri("/stats/cb").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/stats/cb")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(val.get("circuit_breakers").is_some());
+}
+
+#[tokio::test]
+async fn test_server_crawl_endpoint() {
+    let config = AppConfig::default();
+    let http_client = HttpClient::new(None, true, 10).expect("http client");
+    let state = AppState::new(config, vec![], http_client);
+    let app = create_router(state);
+
+    let req_body = serde_json::json!({
+        "start_url": "http://127.0.0.1:8080/internal",
+        "max_depth": 1,
+        "max_pages": 2
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/crawl")
+                .header("content-type", "application/json")
+                .body(Body::from(req_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(val["start_url"], "http://127.0.0.1:8080/internal");
+    assert_eq!(val["pages_crawled"], 0);
 }

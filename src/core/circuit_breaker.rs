@@ -1,9 +1,9 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -175,8 +175,8 @@ impl CircuitBreaker {
             None
         };
 
-        let avg_response_ms = (self.success_latency_sum.as_millis() as u64)
-            .checked_div(self.success_samples);
+        let avg_response_ms =
+            (self.success_latency_sum.as_millis() as u64).checked_div(self.success_samples);
 
         CircuitBreakerStat {
             engine: self.name.clone(),

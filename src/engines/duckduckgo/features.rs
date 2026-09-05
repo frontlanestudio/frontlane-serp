@@ -1,6 +1,6 @@
-use scraper::Html;
 use crate::core::feature_selectors::{extract_serp_features_by_selectors, SerpFeatureSelector};
 use crate::core::types::{ResultType, SerpFeature};
+use scraper::Html;
 
 const DUCKDUCKGO_FEATURE_SPECS: &[SerpFeatureSelector] = &[
     SerpFeatureSelector {
@@ -65,12 +65,7 @@ const DUCKDUCKGO_FEATURE_SPECS: &[SerpFeatureSelector] = &[
         ],
         title_selector: &["h2", "h3", ".module__title"],
         text_selector: &[],
-        item_selector: &[
-            "[data-testid='related-question']",
-            "li a",
-            "button",
-            "a",
-        ],
+        item_selector: &["[data-testid='related-question']", "li a", "button", "a"],
         link_selector: &["a[href^='http']"],
         position: 0,
         confidence: 0.7,
