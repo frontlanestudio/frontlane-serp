@@ -63,6 +63,36 @@ pub fn render_markdown(env: &Envelope) -> String {
         }
     }
 
+    if !env.serp_features.is_empty() {
+        b.push_str("## Features\n\n");
+        for f in &env.serp_features {
+            let title = f.title.as_deref().unwrap_or("Feature");
+            b.push_str(&format!("### {:?}: {}\n\n", f.feature_type, escape_markdown(title)));
+            if let Some(ref text) = f.text {
+                b.push_str(&format!("{}\n\n", text));
+            }
+            if !f.items.is_empty() {
+                for it in &f.items {
+                    let it_text = it.text.as_deref().or(it.title.as_deref()).unwrap_or("");
+                    if let Some(ref link) = it.link {
+                        b.push_str(&format!("* [{}]({})\n", escape_markdown(it_text), link));
+                    } else {
+                        b.push_str(&format!("* {}\n", escape_markdown(it_text)));
+                    }
+                }
+                b.push('\n');
+            }
+            if !f.links.is_empty() {
+                for l in &f.links {
+                    let l_title = l.title.as_deref().unwrap_or("Link");
+                    let l_url = l.url.as_deref().unwrap_or("");
+                    b.push_str(&format!("-> [{}]({})\n", escape_markdown(l_title), l_url));
+                }
+                b.push('\n');
+            }
+        }
+    }
+
     b
 }
 
@@ -118,8 +148,38 @@ pub fn render_text(env: &Envelope) -> String {
         }
     }
 
+    if !env.serp_features.is_empty() {
+        b.push_str("Features\n\n");
+        for f in &env.serp_features {
+            let title = f.title.as_deref().unwrap_or("Feature");
+            b.push_str(&format!("[{:?}] {}\n", f.feature_type, title));
+            if let Some(ref text) = f.text {
+                b.push_str(&format!("{}\n", text));
+            }
+            if !f.items.is_empty() {
+                for it in &f.items {
+                    let it_text = it.text.as_deref().or(it.title.as_deref()).unwrap_or("");
+                    if let Some(ref link) = it.link {
+                        b.push_str(&format!(" - {} ({})\n", it_text, link));
+                    } else {
+                        b.push_str(&format!(" - {}\n", it_text));
+                    }
+                }
+            }
+            if !f.links.is_empty() {
+                for l in &f.links {
+                    let l_title = l.title.as_deref().unwrap_or("Link");
+                    let l_url = l.url.as_deref().unwrap_or("");
+                    b.push_str(&format!(" -> {} ({})\n", l_title, l_url));
+                }
+            }
+            b.push('\n');
+        }
+    }
+
     b
 }
+
 
 pub fn render_text_image(env: &ImageEnvelope) -> String {
     let mut b = String::new();

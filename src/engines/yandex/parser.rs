@@ -34,9 +34,8 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
 
     for item in document.select(items) {
         // Skip neuro / AI summary if caught as item
-        let is_neuro = item.value().attr("data-fast-name") == Some("alice-ai")
-            || item.value().attr("data-fast-name") == Some("neuro");
-        if is_neuro {
+        let fast_name = item.value().attr("data-fast-name").unwrap_or("");
+        if fast_name == "alice-ai" || fast_name == "neuro" || fast_name == "neuro_answer" {
             continue;
         }
 
@@ -114,6 +113,9 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
             image_source: None,
         });
     }
+
+    let features = super::features::extract_yandex_features(&document);
+    let results = crate::core::attach_features_to_results(results, features);
 
     Ok(deduplicate_results(results))
 }

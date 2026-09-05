@@ -40,6 +40,15 @@ pub enum Commands {
 
     /// Extract content from a URL or llms.txt
     Extract(ExtractArgs),
+
+    /// Check ranking for a target domain or URL
+    Rank(RankArgs),
+
+    /// Fetch autocomplete keyword suggestions
+    Suggest(SuggestArgs),
+
+    /// Run as a Model Context Protocol (MCP) server over stdio
+    Mcp,
 }
 
 #[derive(Args, Debug)]
@@ -118,4 +127,67 @@ pub struct ExtractArgs {
     /// Check for /llms-full.txt and /llms.txt before scraping
     #[arg(long, default_value = "true")]
     pub llms_txt: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RankArgs {
+    /// Target domain or URL (e.g. example.com, blog.example.com)
+    pub target: String,
+
+    /// Query keyword to search
+    pub query: String,
+
+    /// Search engine: google, bing, duckduckgo, etc.
+    #[arg(short, long, default_value = "google")]
+    pub engine: String,
+
+    /// Strategy: smart, basic, custom
+    #[arg(short, long, default_value = "smart")]
+    pub strategy: String,
+
+    /// Last known rank (0 if unranked)
+    #[arg(long, default_value = "0")]
+    pub last_rank: usize,
+
+    /// Maximum pages to probe (default 5)
+    #[arg(long, default_value = "5")]
+    pub limit: usize,
+
+    /// Enable smart full walk fallback if not found in neighbor window
+    #[arg(long, default_value = "false")]
+    pub fallback: bool,
+
+    /// Match mode: subdomain, exact, wildcard
+    #[arg(short, long, default_value = "subdomain")]
+    pub r#match: String,
+
+    /// Device: desktop, mobile
+    #[arg(short, long, default_value = "desktop")]
+    pub device: String,
+
+    /// Output format: json, text
+    #[arg(short, long, value_enum, default_value = "text")]
+    pub format: CliFormat,
+}
+
+#[derive(Args, Debug)]
+pub struct SuggestArgs {
+    /// Query prefix
+    pub query: String,
+
+    /// Search engine: google, bing, duckduckgo, ecosia
+    #[arg(short, long, default_value = "google")]
+    pub engine: String,
+
+    /// Language code (e.g. en)
+    #[arg(long, default_value = "en")]
+    pub lang: String,
+
+    /// Region code (e.g. us)
+    #[arg(long, default_value = "us")]
+    pub region: String,
+
+    /// Output format: json, text
+    #[arg(short, long, value_enum, default_value = "text")]
+    pub format: CliFormat,
 }

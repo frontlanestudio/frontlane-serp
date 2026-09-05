@@ -136,6 +136,9 @@ pub fn parse_html(html_str: &str) -> Result<Vec<SearchResult>> {
         }
     }
 
+    let features = super::features::extract_ecosia_features(&document);
+    let results = crate::core::attach_features_to_results(results, features);
+
     Ok(deduplicate_results(results))
 }
 

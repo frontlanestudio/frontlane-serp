@@ -2,7 +2,7 @@ use clap::Parser;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use frontlane_serp::cli::{Cli, CliFormat, Commands, ExtractArgs, SearchArgs};
+use frontlane_serp::cli::{Cli, CliFormat, Commands, ExtractArgs, RankArgs, SearchArgs, SuggestArgs};
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
 use frontlane_serp::core::format::render_envelope;
@@ -15,8 +15,11 @@ use frontlane_serp::engines::{
     Baidu, Bing, DuckDuckGo, Ecosia, Google, Yandex,
 };
 use frontlane_serp::extract::Extractor;
+use frontlane_serp::mcp::run_stdio_mcp_server;
 use frontlane_serp::mega::MegaSearcher;
+use frontlane_serp::rank::{probe_engine_rank, DeviceType, DomainMatchMode, RankRequest, RankStrategy};
 use frontlane_serp::server::run_server;
+use frontlane_serp::suggest::SuggestClient;
 
 fn to_output_format(fmt: CliFormat) -> OutputFormat {
     match fmt {
@@ -87,6 +90,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Extract(extract_args)) => {
             handle_extract(&extract_args, &http_client).await?;
+        }
+        Some(Commands::Rank(rank_args)) => {
+            handle_rank(&rank_args, &engines).await?;
+        }
+        Some(Commands::Suggest(suggest_args)) => {
+            handle_suggest(&suggest_args, &http_client).await?;
+        }
+        Some(Commands::Mcp) => {
+            handle_mcp(&engines, &http_client).await?;
         }
         None => {
             // Default action: start server
@@ -215,6 +227,114 @@ async fn handle_extract(
         }
     }
 
+    Ok(())
+}
+
+async fn handle_rank(
+    args: &RankArgs,
+    engines: &[Arc<dyn SearchEngine>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let norm_engine = match args.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = engines
+        .iter()
+        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
+        .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
+        .clone();
+
+    let strategy = match args.strategy.as_str() {
+        "basic" => RankStrategy::Basic,
+        "custom" => RankStrategy::Custom,
+        _ => RankStrategy::Smart,
+    };
+
+    let match_mode = match args.r#match.as_str() {
+        "exact" => DomainMatchMode::Exact,
+        "wildcard" => DomainMatchMode::Wildcard,
+        _ => DomainMatchMode::Subdomain,
+    };
+
+    let device = match args.device.as_str() {
+        "mobile" => DeviceType::Mobile,
+        _ => DeviceType::Desktop,
+    };
+
+    let req = RankRequest {
+        target: args.target.clone(),
+        q: args.query.clone(),
+        strategy,
+        last_rank: args.last_rank,
+        pagination_limit: args.limit,
+        smart_full_fallback: args.fallback,
+        r#match: match_mode,
+        device,
+        region: "US".to_string(),
+        lang: "en".to_string(),
+    };
+
+    let resp = probe_engine_rank(engine, &req)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    if args.format == CliFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.ranked {
+        println!(
+            "🎯 RANK #{} | Target: {} | Engine: {} | URL: {}",
+            resp.rank.unwrap_or(0),
+            resp.target,
+            resp.engine,
+            resp.url.as_deref().unwrap_or("")
+        );
+    } else {
+        println!(
+            "❌ NOT RANKED | Target: {} | Checked {} pages | Engine: {}",
+            resp.target,
+            resp.pages_scraped.len(),
+            resp.engine
+        );
+    }
+
+    Ok(())
+}
+
+async fn handle_suggest(
+    args: &SuggestArgs,
+    http_client: &HttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = SuggestClient::new(http_client.clone());
+    let resp = client
+        .suggest(&args.engine, &args.query, &args.lang, &args.region)
+        .await
+        .map_err(|e| format!("{e}"))?;
+
+    if args.format == CliFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("Suggestions for '{}' ({}):", resp.query, resp.engine);
+        for (i, s) in resp.suggestions.iter().enumerate() {
+            println!("  {}. {}", i + 1, s);
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_mcp(
+    engines: &[Arc<dyn SearchEngine>],
+    http_client: &HttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut engine_map = std::collections::HashMap::new();
+    for e in engines {
+        engine_map.insert(e.name().to_string(), e.clone());
+    }
+    let extractor = Arc::new(Extractor::new(http_client.clone()));
+    let mega = Arc::new(MegaSearcher::new(engines.to_vec(), Some((*extractor).clone())));
+    let suggest = SuggestClient::new(http_client.clone());
+
+    run_stdio_mcp_server(engine_map, mega, extractor, suggest).await?;
     Ok(())
 }
 

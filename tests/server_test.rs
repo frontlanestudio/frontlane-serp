@@ -73,3 +73,82 @@ async fn test_server_parse_google_endpoint() {
     assert!(body_str.contains("results"));
     assert!(body_str.contains("MDN Web Docs") || body_str.contains("test.test"));
 }
+
+#[tokio::test]
+async fn test_server_rank_validation() {
+    let config = AppConfig::default();
+    let http_client = HttpClient::new(None, true, 10).expect("http client");
+    let state = AppState::new(config, vec![], http_client);
+    let app = create_router(state);
+
+    // Missing target/q should return 400
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/google/rank")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_server_suggest_validation() {
+    let config = AppConfig::default();
+    let http_client = HttpClient::new(None, true, 10).expect("http client");
+    let state = AppState::new(config, vec![], http_client);
+    let app = create_router(state);
+
+    // Missing q parameter should return 400
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/google/suggest")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_server_jobs_routes() {
+    let config = AppConfig::default();
+    let http_client = HttpClient::new(None, true, 10).expect("http client");
+    let state = AppState::new(config, vec![], http_client);
+    let app = create_router(state);
+
+    // Non-existent job returns 404
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/jobs/job_does_not_exist")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // Empty batch returns 400
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rank/batch")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"targets": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

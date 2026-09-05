@@ -3,6 +3,7 @@ pub mod clusters;
 pub mod domain;
 pub mod engine;
 pub mod error;
+pub mod feature_selectors;
 pub mod format;
 pub mod http_client;
 pub mod locale;
@@ -11,6 +12,11 @@ pub mod rate_limiter;
 pub mod resilient;
 pub mod response_builder;
 pub mod types;
+
+pub use feature_selectors::{
+    attach_features_to_results, deduplicate_serp_features, extract_serp_features_by_selectors,
+    SerpFeatureSelector,
+};
 
 pub use clusters::build_clusters;
 pub use domain::{classify_url, enrich_domain_info, normalize_domain, split_domain};

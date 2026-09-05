@@ -18,6 +18,9 @@ use crate::core::types::{
     SerpFeature, API_VERSION,
 };
 use crate::server::state::AppState;
+use crate::compat::{convert_envelope_to_serper, convert_envelope_to_serpapi, SerpApiParams, SerperRequest};
+use crate::jobs::types::BatchRankRequest;
+use crate::rank::{probe_engine_rank, DeviceType, DomainMatchMode, RankRequest, RankStrategy};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQueryParams {
@@ -777,5 +780,395 @@ pub async fn parse_bing_handler(body: String) -> Response {
     }
 
     format_response(&env, OutputFormat::Json)
+}
+
+// Serper search handler
+pub async fn serper_search_handler(
+    State(state): State<AppState>,
+    Json(req): Json<SerperRequest>,
+) -> Response {
+    let engine = match state.engines.get("google") {
+        Some(e) => e.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": "Google engine not initialized" }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let num = if req.num == 0 { 10 } else { req.num };
+    let page = if req.page == 0 { 1 } else { req.page };
+    let start = (page - 1) * num;
+
+    let query = Query {
+        text: req.q.clone(),
+        lang_code: req.hl.clone(),
+        region: req.gl.clone(),
+        date_interval: String::new(),
+        filetype: String::new(),
+        site: String::new(),
+        limit: num,
+        start,
+        filter: true,
+        features: true,
+        extract: false,
+        extract_top: 0,
+        extract_mode: "auto".to_string(),
+        extract_min_runes: 0,
+        proxy_url: None,
+        proxy_country: None,
+        proxy_class: None,
+        proxy_provider: None,
+        proxy_session_id: None,
+        proxy_override: None,
+        insecure: true,
+        guard_private_networks: false,
+    };
+
+    let started_at = Utc::now();
+    let start_time = Instant::now();
+    let request_id = uuid::Uuid::now_v7().to_string();
+
+    let results = match engine.search(&query).await {
+        Ok(res) => res,
+        Err(e) => return error_response(e),
+    };
+
+    let took_ms = start_time.elapsed().as_millis() as i64;
+    let mut env = Envelope::new(&query, request_id, started_at, vec!["google".to_string()]);
+    env.meta.took_ms = took_ms;
+    env.meta.engines_responded = vec!["google".to_string()];
+
+    for raw in results {
+        for feat in &raw.features {
+            env.serp_features.push(feat.clone());
+        }
+        env.results.push(enrich_result(raw, "google", start));
+    }
+
+    let serper_res = convert_envelope_to_serper(&env, &req);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        serde_json::to_string(&serper_res).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+// SerpApi search handler
+pub async fn serpapi_search_handler(
+    State(state): State<AppState>,
+    AxumQuery(params): AxumQuery<SerpApiParams>,
+) -> Response {
+    let norm_engine = match params.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = match state.engines.get(&norm_engine) {
+        Some(e) => e.clone(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": format!("Unsupported engine: {}", params.engine) }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let query = Query {
+        text: params.q.clone(),
+        lang_code: params.hl.clone(),
+        region: params.gl.clone(),
+        date_interval: String::new(),
+        filetype: String::new(),
+        site: String::new(),
+        limit: params.num,
+        start: params.start,
+        filter: true,
+        features: true,
+        extract: false,
+        extract_top: 0,
+        extract_mode: "auto".to_string(),
+        extract_min_runes: 0,
+        proxy_url: None,
+        proxy_country: None,
+        proxy_class: None,
+        proxy_provider: None,
+        proxy_session_id: None,
+        proxy_override: None,
+        insecure: true,
+        guard_private_networks: false,
+    };
+
+    let started_at = Utc::now();
+    let start_time = Instant::now();
+    let request_id = uuid::Uuid::now_v7().to_string();
+
+    let results = match engine.search(&query).await {
+        Ok(res) => res,
+        Err(e) => return error_response(e),
+    };
+
+    let took_ms = start_time.elapsed().as_millis() as i64;
+    let mut env = Envelope::new(&query, request_id, started_at, vec![norm_engine.clone()]);
+    env.meta.took_ms = took_ms;
+    env.meta.engines_responded = vec![norm_engine.clone()];
+
+    for raw in results {
+        for feat in &raw.features {
+            env.serp_features.push(feat.clone());
+        }
+        env.results.push(enrich_result(raw, &norm_engine, query.start));
+    }
+
+    let serpapi_res = convert_envelope_to_serpapi(&env, &params);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        serde_json::to_string(&serpapi_res).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+// Rank query params
+#[derive(Debug, Deserialize)]
+pub struct RankQueryParams {
+    pub target: Option<String>,
+    pub q: Option<String>,
+    pub query: Option<String>,
+    #[serde(default)]
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub last_rank: Option<usize>,
+    #[serde(default)]
+    pub pagination_limit: Option<usize>,
+    #[serde(default)]
+    pub smart_full_fallback: Option<bool>,
+    #[serde(default)]
+    pub r#match: Option<String>,
+    #[serde(default)]
+    pub device: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub lang: Option<String>,
+}
+
+pub async fn rank_get_handler(
+    Path(engine_name): Path<String>,
+    AxumQuery(params): AxumQuery<RankQueryParams>,
+    State(state): State<AppState>,
+) -> Response {
+    let target = params.target.unwrap_or_default();
+    let q_text = params.q.or(params.query).unwrap_or_default();
+
+    if target.trim().is_empty() || q_text.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "'target' and 'q' parameters are required" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let strategy = match params.strategy.as_deref() {
+        Some("basic") => RankStrategy::Basic,
+        Some("custom") => RankStrategy::Custom,
+        _ => RankStrategy::Smart,
+    };
+
+    let match_mode = match params.r#match.as_deref() {
+        Some("exact") => DomainMatchMode::Exact,
+        Some("wildcard") => DomainMatchMode::Wildcard,
+        _ => DomainMatchMode::Subdomain,
+    };
+
+    let device = match params.device.as_deref() {
+        Some("mobile") => DeviceType::Mobile,
+        _ => DeviceType::Desktop,
+    };
+
+    let req = RankRequest {
+        target,
+        q: q_text,
+        strategy,
+        last_rank: params.last_rank.unwrap_or(0),
+        pagination_limit: params.pagination_limit.unwrap_or(5),
+        smart_full_fallback: params.smart_full_fallback.unwrap_or(false),
+        r#match: match_mode,
+        device,
+        region: params.region.unwrap_or_default(),
+        lang: params.lang.unwrap_or_default(),
+    };
+
+    execute_rank_probe(engine_name, req, state).await
+}
+
+pub async fn rank_post_handler(
+    Path(engine_name): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<RankRequest>,
+) -> Response {
+    if req.target.trim().is_empty() || req.q.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "'target' and 'q' fields are required" }).to_string(),
+        )
+            .into_response();
+    }
+    execute_rank_probe(engine_name, req, state).await
+}
+
+async fn execute_rank_probe(engine_name: String, req: RankRequest, state: AppState) -> Response {
+    let norm_engine = match engine_name.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = match state.engines.get(&norm_engine) {
+        Some(e) => e.clone(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": format!("Unsupported engine: {}", engine_name) }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    match probe_engine_rank(engine, &req).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string(&resp).unwrap_or_default(),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": format!("Rank probe failed: {}", e) }).to_string(),
+        )
+            .into_response(),
+    }
+}
+
+// Suggest handler
+#[derive(Debug, Deserialize)]
+pub struct SuggestQueryParams {
+    pub q: Option<String>,
+    pub query: Option<String>,
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+}
+
+pub async fn suggest_handler(
+    Path(engine_name): Path<String>,
+    AxumQuery(params): AxumQuery<SuggestQueryParams>,
+    State(state): State<AppState>,
+) -> Response {
+    let q_text = params.q.or(params.query).unwrap_or_default();
+    if q_text.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "Query parameter ('q') is required" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let lang = params.lang.as_deref().unwrap_or("en");
+    let region = params.region.as_deref().unwrap_or("us");
+
+    match state.suggest.suggest(&engine_name, &q_text, lang, region).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string(&resp).unwrap_or_default(),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": format!("Suggestion failed: {}", e) }).to_string(),
+        )
+            .into_response(),
+    }
+}
+
+// Batch rank job handler
+pub async fn batch_rank_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BatchRankRequest>,
+) -> Response {
+    if req.targets.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "At least one target item is required" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let norm_engine = match req.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = match state.engines.get(&norm_engine) {
+        Some(e) => e.clone(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": format!("Unsupported engine: {}", req.engine) }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let total = req.targets.len();
+    let job_id = state.jobs.submit_batch_rank(req, engine).await;
+
+    (
+        StatusCode::ACCEPTED,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        json!({
+            "job_id": job_id,
+            "status": "queued",
+            "total": total
+        })
+        .to_string(),
+    )
+        .into_response()
+}
+
+// Job status handler
+pub async fn job_status_handler(
+    Path(job_id): Path<String>,
+    State(state): State<AppState>,
+) -> Response {
+    match state.jobs.get_job(&job_id).await {
+        Some(details) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string(&details).unwrap_or_default(),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": format!("Job not found: {}", job_id) }).to_string(),
+        )
+            .into_response(),
+    }
 }
 

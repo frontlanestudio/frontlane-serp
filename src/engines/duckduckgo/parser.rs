@@ -64,6 +64,9 @@ pub fn parse_html(html_str: &str, page_num: i32) -> Result<Vec<SearchResult>> {
         });
     }
 
+    let features = super::features::extract_duckduckgo_features(&document);
+    let results = crate::core::attach_features_to_results(results, features);
+
     Ok(deduplicate_results(results))
 }
 

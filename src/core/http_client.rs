@@ -54,6 +54,18 @@ impl HttpClient {
         Ok(Self { client })
     }
 
+    pub fn inner(&self) -> &Client {
+        &self.client
+    }
+
+    pub async fn get(&self, url: &str) -> reqwest::Result<reqwest::Response> {
+        self.client.get(url).send().await
+    }
+
+    pub async fn post_json<T: serde::Serialize>(&self, url: &str, body: &T) -> reqwest::Result<reqwest::Response> {
+        self.client.post(url).json(body).send().await
+    }
+
     pub async fn fetch(&self, url: &str, lang: Option<&str>) -> Result<String> {
         let mut req = self.client.get(url);
         if let Some(l) = lang {

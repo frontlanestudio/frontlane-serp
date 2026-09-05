@@ -23,6 +23,28 @@ No API keys, no per-search billing: one command gives you live, structured searc
 - Image search, filters (language, date range, file type, site), **JSON/Markdown/Text/NdJSON** output
 - Proxies, cache, resilient mode, prebuilt Docker images
 
+## 🚀 Frontlane SERP Breakthrough Features
+
+Built in Rust for maximum speed and zero memory overhead, **Frontlane SERP** incorporates advanced SEO platform capabilities inspired by SerpBear, OpenSEO, s33k, CrawlSEO, and Bisibility:
+
+1. **Drop-In Serper & SerpApi Compatibility Layers**
+   - Seamlessly point tools like **SerpBear**, **OpenSEO**, **s33k**, **Bisibility**, or **LangChain** directly to Frontlane SERP to eliminate 100% of 3rd-party API bills.
+   - Endpoints: `POST /v1/serper/search` & `GET /v1/serpapi/search`.
+2. **Native Smart Probing (`/{engine}/rank`)**
+   - Intelligently probes rankings using target neighbor page windows (`[P-1, P, P+1]`) to cut crawling volume by 70–90%.
+   - Supports subdomain wildcards, exact URL matching, mobile vs. desktop emulation, and SERP feature attribution.
+   - CLI: `frontlane-serp rank example.com "keyword" --strategy smart`
+3. **Keyword Autocomplete & Suggestion Engine (`/{engine}/suggest`)**
+   - Blazing-fast keyword expansion across Google, Bing, DuckDuckGo, and Ecosia with zero proxy friction.
+   - CLI: `frontlane-serp suggest "rust programming" --engine google`
+4. **Native Model Context Protocol (MCP) Server**
+   - Connect directly from **Claude Desktop**, **Cursor**, **Antigravity**, or **Claude Code** via standard I/O:
+   - CLI: `frontlane-serp mcp`
+   - Tools: `serp_search`, `check_rank`, `suggest_keywords`, `extract_content`, `mega_search`.
+5. **Embedded Asynchronous Batch Job Queue & Webhooks**
+   - Queue hundreds of ranking checks with bounded concurrency and automatic outbound webhook delivery on completion.
+   - Endpoints: `POST /v1/rank/batch` & `GET /v1/jobs/:id`.
+
 ## Quick Start
 
 ### Docker

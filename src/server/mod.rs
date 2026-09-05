@@ -44,6 +44,19 @@ pub fn create_router(state: AppState) -> Router {
         // Extraction
         .route("/extract", get(extract_handler).post(extract_post_handler))
         .route("/extract/batch", post(extract_batch_handler))
+        // Serper Compatibility
+        .route("/v1/serper/search", post(serper_search_handler))
+        .route("/serper/search", post(serper_search_handler))
+        // SerpApi Compatibility
+        .route("/v1/serpapi/search", get(serpapi_search_handler))
+        .route("/serpapi/search", get(serpapi_search_handler))
+        // Rank & Smart Probing
+        .route("/{engine}/rank", get(rank_get_handler).post(rank_post_handler))
+        // Autocomplete / Suggest
+        .route("/{engine}/suggest", get(suggest_handler))
+        // Asynchronous Batch Jobs
+        .route("/v1/rank/batch", post(batch_rank_handler))
+        .route("/v1/jobs/{id}", get(job_status_handler))
         .layer(from_fn(request_id_middleware))
         .layer(cors)
         .with_state(state)
