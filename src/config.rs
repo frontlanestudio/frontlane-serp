@@ -353,10 +353,28 @@ fn default_cors_max_age() -> u64 {
     86400
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptchaConfig {
     #[serde(default)]
     pub solver_enabled: bool,
+    #[serde(default = "default_captcha_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub apikey: Option<String>,
+}
+
+impl Default for CaptchaConfig {
+    fn default() -> Self {
+        Self {
+            solver_enabled: false,
+            provider: default_captcha_provider(),
+            apikey: None,
+        }
+    }
+}
+
+fn default_captcha_provider() -> String {
+    "capsolver".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -30,7 +30,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/health", get(health_handler))
         .route("/ready", get(ready_handler))
         .route("/stats", get(stats_handler))
-        .route("/stats/cache", get(stats_handler))
+        .route("/stats/cache", get(cache_stats_handler))
+        .route("/stats/proxy", get(proxy_stats_handler))
+        .route("/stats/cb", get(circuit_breaker_stats_handler))
         // Mega
         .route("/mega/search", get(mega_search_handler))
         .route("/mega/image", get(mega_image_handler))

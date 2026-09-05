@@ -2,7 +2,7 @@ use frontlane_serp::engines::google::parser::parse_html;
 
 #[test]
 fn test_parse_google_fixture() {
-    let html = std::fs::read_to_string("google/testdata/search_results.html")
+    let html = std::fs::read_to_string("tests/fixtures/google/search_results.html")
         .expect("failed to read test fixture");
 
     let results = parse_html(&html, 0).expect("failed to parse google HTML");

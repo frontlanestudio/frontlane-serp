@@ -129,8 +129,11 @@ impl MegaSearcher {
         if query.extract {
             if let Some(ref ext) = self.extractor {
                 let extract_count = query.extract_top.min(final_results.len());
+                let lane_key = query.proxy_session_id.as_ref().map(|sid| {
+                    crate::core::proxy::ProxyLaneKey::new("default", "mega", sid)
+                });
                 for item in final_results.iter_mut().take(extract_count) {
-                    if let Ok(content) = ext.extract(&item.url, true).await {
+                    if let Ok(content) = ext.extract_with_options(&item.url, true, query.proxy_url.as_deref(), lane_key.as_ref()).await {
                         item.extracted = Some(content);
                     }
                 }

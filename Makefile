@@ -1,25 +1,33 @@
-GO ?= go
-BINARY ?= openserp
-PKGS ?= ./...
-GOFILES := $(shell git ls-files '*.go')
+CARGO ?= cargo
+BINARY ?= frontlane-serp
 
-.PHONY: build test test-integration lint run fmt
+.PHONY: all build release test test-integration lint check run fmt clean
+
+all: build
 
 build:
-	$(GO) build -o $(BINARY) .
+	$(CARGO) build
+
+release:
+	$(CARGO) build --release
 
 test:
-	$(GO) test -race -count=1 $(PKGS)
+	$(CARGO) test
 
 test-integration:
-	OPENSERP_INTEGRATION_TESTS=1 $(GO) test -race -count=1 -timeout=120s -tags=integration $(PKGS)
+	$(CARGO) test --test '*' -- --nocapture
 
 lint:
-	$(GO) vet $(PKGS)
-	golangci-lint run --config .golangci.yml
+	$(CARGO) clippy --all-targets -- -D warnings
+
+check:
+	$(CARGO) check --all-targets
 
 run:
-	$(GO) run . serve
+	$(CARGO) run -- serve
 
 fmt:
-	gofmt -w $(GOFILES)
+	$(CARGO) fmt
+
+clean:
+	$(CARGO) clean

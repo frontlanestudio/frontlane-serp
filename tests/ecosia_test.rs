@@ -2,7 +2,7 @@ use frontlane_serp::engines::ecosia::parser::parse_html;
 
 #[test]
 fn test_parse_ecosia_fixture() {
-    let html = std::fs::read_to_string("ecosia/testdata/search_results.html")
+    let html = std::fs::read_to_string("tests/fixtures/ecosia/search_results.html")
         .expect("failed to read test fixture");
 
     let results = parse_html(&html).expect("failed to parse ecosia HTML");

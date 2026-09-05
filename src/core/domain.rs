@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use crate::core::types::{Classification, DomainInfo};
 
-const DEFAULT_ENRICHMENT_DOMAINS_YAML: &str = include_str!("../../core/enrichment_domains.yaml");
+const DEFAULT_ENRICHMENT_DOMAINS_YAML: &str = include_str!("enrichment_domains.yaml");
 
 #[derive(Debug, Deserialize)]
 struct EnrichmentFile {

@@ -309,6 +309,11 @@ pub async fn ready_handler() -> Response {
 }
 
 pub async fn stats_handler(State(state): State<AppState>) -> Response {
+    let lane_stats = state.lane_store.stats().await;
+    let proxy_stats = state.proxy_manager.stats(Some(lane_stats)).await;
+    let cb_stats = state.circuit_breaker_manager.all_stats().await;
+    let captcha_metrics = crate::core::captcha::captcha_solver_metrics();
+
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
@@ -316,7 +321,48 @@ pub async fn stats_handler(State(state): State<AppState>) -> Response {
             "cache": {
                 "entry_count": state.cache.len(),
             },
+            "proxy": proxy_stats,
+            "circuit_breakers": cb_stats,
+            "captcha": captcha_metrics,
             "engines": state.engines.keys().cloned().collect::<Vec<_>>()
+        })
+        .to_string(),
+    )
+        .into_response()
+}
+
+pub async fn cache_stats_handler(State(state): State<AppState>) -> Response {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        json!({
+            "entry_count": state.cache.len(),
+        })
+        .to_string(),
+    )
+        .into_response()
+}
+
+pub async fn proxy_stats_handler(State(state): State<AppState>) -> Response {
+    let lane_stats = state.lane_store.stats().await;
+    let proxy_stats = state.proxy_manager.stats(Some(lane_stats)).await;
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        json!(proxy_stats).to_string(),
+    )
+        .into_response()
+}
+
+pub async fn circuit_breaker_stats_handler(State(state): State<AppState>) -> Response {
+    let cb_stats = state.circuit_breaker_manager.all_stats().await;
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        json!({
+            "circuit_breakers": cb_stats,
         })
         .to_string(),
     )
@@ -375,13 +421,42 @@ pub async fn search_single_handler(
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
 
-    let results = match engine.search(&query).await {
-        Ok(res) => res,
-        Err(e) => return error_response(e),
+    let mut effective_query = query.clone();
+    if effective_query.proxy_url.is_none() {
+        let country_hint = effective_query.proxy_country.as_deref().or(
+            if !effective_query.region.is_empty() {
+                Some(effective_query.region.as_str())
+            } else {
+                None
+            }
+        );
+        effective_query.proxy_url = state
+            .proxy_manager
+            .resolve_proxy(Some(&normalized_engine), None, country_hint)
+            .await;
+    }
+
+    let results = match engine.search(&effective_query).await {
+        Ok(res) => {
+            if let Some(ref p) = effective_query.proxy_url {
+                state.proxy_manager.report_result(p, true).await;
+            }
+            res
+        }
+        Err(e) => {
+            if let Some(ref p) = effective_query.proxy_url {
+                if matches!(e, SerpError::CaptchaDetected | SerpError::Blocked(_)) {
+                    state.proxy_manager.report_challenge(p).await;
+                } else {
+                    state.proxy_manager.report_result(p, false).await;
+                }
+            }
+            return error_response(e);
+        }
     };
 
     let took_ms = start_time.elapsed().as_millis() as i64;
-    let mut env = Envelope::new(&query, request_id, started_at, vec![normalized_engine.clone()]);
+    let mut env = Envelope::new(&effective_query, request_id, started_at, vec![normalized_engine.clone()]);
     env.meta.took_ms = took_ms;
     env.meta.engines_responded = vec![normalized_engine.clone()];
 
@@ -392,14 +467,21 @@ pub async fn search_single_handler(
         for feat in &raw.features {
             serp_features.push(feat.clone());
         }
-        let enriched = enrich_result(raw, &normalized_engine, query.start);
+        let enriched = enrich_result(raw, &normalized_engine, effective_query.start);
         enriched_results.push(enriched);
     }
 
-    if query.extract {
-        let extract_count = query.extract_top.min(enriched_results.len());
+    if effective_query.extract {
+        let extract_count = effective_query.extract_top.min(enriched_results.len());
+        let lane_key = effective_query.proxy_session_id.as_ref().map(|sid| {
+            crate::core::proxy::ProxyLaneKey::new("default", &normalized_engine, sid)
+        });
         for item in enriched_results.iter_mut().take(extract_count) {
-            if let Ok(content) = state.extractor.extract(&item.url, true).await {
+            if let Ok(content) = state
+                .extractor
+                .extract_with_options(&item.url, true, effective_query.proxy_url.as_deref(), lane_key.as_ref())
+                .await
+            {
                 item.extracted = Some(content);
             }
         }
@@ -594,8 +676,38 @@ pub async fn extract_handler(
         }
     };
 
+    let proxy_url = headers
+        .get("x-proxy-url")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_country = headers
+        .get("x-proxy-country")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_session_id = headers
+        .get("x-proxy-session-id")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let tenant = headers
+        .get("x-tenant")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("default");
+
+    let resolved_proxy = state
+        .proxy_manager
+        .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
+        .await;
+
+    let lane_key = proxy_session_id.map(|sid| {
+        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
+    });
+
     let use_llms_txt = params.use_llms_txt.unwrap_or(false);
-    match state.extractor.extract(&url, use_llms_txt).await {
+    match state
+        .extractor
+        .extract_with_options(&url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+        .await
+    {
         Ok(content) => {
             let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
             let format = determine_format(params.format.as_deref(), accept_header);
@@ -619,6 +731,7 @@ pub async fn extract_handler(
 }
 
 pub async fn extract_post_handler(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<ExtractPostRequest>,
 ) -> Response {
@@ -631,8 +744,38 @@ pub async fn extract_post_handler(
             .into_response();
     }
 
+    let proxy_url = headers
+        .get("x-proxy-url")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_country = headers
+        .get("x-proxy-country")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_session_id = headers
+        .get("x-proxy-session-id")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let tenant = headers
+        .get("x-tenant")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("default");
+
+    let resolved_proxy = state
+        .proxy_manager
+        .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
+        .await;
+
+    let lane_key = proxy_session_id.map(|sid| {
+        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
+    });
+
     let use_llms_txt = payload.use_llms_txt.unwrap_or(false);
-    match state.extractor.extract(&payload.url, use_llms_txt).await {
+    match state
+        .extractor
+        .extract_with_options(&payload.url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+        .await
+    {
         Ok(content) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
@@ -644,6 +787,7 @@ pub async fn extract_post_handler(
 }
 
 pub async fn extract_batch_handler(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<BatchExtractRequest>,
 ) -> Response {
@@ -656,11 +800,41 @@ pub async fn extract_batch_handler(
             .into_response();
     }
 
+    let proxy_url = headers
+        .get("x-proxy-url")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_country = headers
+        .get("x-proxy-country")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let proxy_session_id = headers
+        .get("x-proxy-session-id")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let tenant = headers
+        .get("x-tenant")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("default");
+
+    let resolved_proxy = state
+        .proxy_manager
+        .resolve_proxy(None, proxy_url.as_deref(), proxy_country.as_deref())
+        .await;
+
+    let lane_key = proxy_session_id.map(|sid| {
+        crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid)
+    });
+
     let use_llms_txt = payload.use_llms_txt.unwrap_or(false);
     let mut items = Vec::new();
 
     for url in &payload.urls {
-        match state.extractor.extract(url, use_llms_txt).await {
+        match state
+            .extractor
+            .extract_with_options(url, use_llms_txt, resolved_proxy.as_deref(), lane_key.as_ref())
+            .await
+        {
             Ok(content) => {
                 items.push(BatchExtractItem {
                     page_content: content.content.unwrap_or_default(),

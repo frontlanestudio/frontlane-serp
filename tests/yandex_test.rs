@@ -2,7 +2,7 @@ use frontlane_serp::engines::yandex::parser::parse_html;
 
 #[test]
 fn test_parse_yandex_fixture() {
-    let html = std::fs::read_to_string("yandex/testdata/search_results.html")
+    let html = std::fs::read_to_string("tests/fixtures/yandex/search_results.html")
         .expect("failed to read test fixture");
 
     let results = parse_html(&html, 0).expect("failed to parse yandex HTML");

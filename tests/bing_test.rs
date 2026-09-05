@@ -2,7 +2,7 @@ use frontlane_serp::engines::bing::parser::parse_html;
 
 #[test]
 fn test_parse_bing_fixture() {
-    let html = std::fs::read_to_string("bing/testdata/search_results.html")
+    let html = std::fs::read_to_string("tests/fixtures/bing/search_results.html")
         .expect("failed to read test fixture");
 
     let results = parse_html(&html, 0).expect("failed to parse bing HTML");

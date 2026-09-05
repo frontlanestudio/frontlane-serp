@@ -3,8 +3,11 @@ use std::sync::Arc;
 
 use crate::config::AppConfig;
 use crate::core::cache::ResponseCache;
+use crate::core::captcha::{CaptchaSolver, CaptchaSolverConfig};
+use crate::core::circuit_breaker::{CircuitBreakerConfig as CbConfig, CircuitBreakerManager};
 use crate::core::engine::SearchEngine;
 use crate::core::http_client::HttpClient;
+use crate::core::proxy::{LaneStore, ProxyManager};
 use crate::extract::Extractor;
 use crate::jobs::JobManager;
 use crate::mega::MegaSearcher;
@@ -20,6 +23,10 @@ pub struct AppState {
     pub extractor: Arc<Extractor>,
     pub suggest: Arc<SuggestClient>,
     pub jobs: Arc<JobManager>,
+    pub proxy_manager: Arc<ProxyManager>,
+    pub lane_store: Arc<LaneStore>,
+    pub captcha_solver: Arc<CaptchaSolver>,
+    pub circuit_breaker_manager: Arc<CircuitBreakerManager>,
 }
 
 impl AppState {
@@ -33,7 +40,37 @@ impl AppState {
             engine_map.insert(e.name().to_string(), e.clone());
         }
 
-        let extractor = Arc::new(Extractor::new(http_client.clone()));
+        let entries: Vec<(String, Vec<String>)> = config
+            .proxies
+            .entries
+            .iter()
+            .map(|e| (e.url.clone(), e.tags.clone()))
+            .collect();
+
+        let proxy_manager = Arc::new(ProxyManager::new(
+            config.proxies.global.clone(),
+            entries,
+            config.proxies.health.failure_threshold as usize,
+            config.proxies.allow_request_proxy_url,
+        ));
+
+        let lane_store = Arc::new(LaneStore::new(config.proxies.lanes.max_lanes));
+
+        let solver_config = CaptchaSolverConfig {
+            enabled: config.captcha.solver_enabled,
+            provider: config.captcha.provider.clone(),
+            api_key: config.captcha.apikey.clone().unwrap_or_default(),
+            poll_interval_ms: 2000,
+            max_poll_timeout_secs: 60,
+        };
+        let captcha_solver = Arc::new(CaptchaSolver::new(solver_config));
+
+        let extractor = Arc::new(Extractor::with_solver_and_lanes(
+            http_client.clone(),
+            Some((*captcha_solver).clone()),
+            Some((*lane_store).clone()),
+        ));
+
         let mega = Arc::new(MegaSearcher::new(engines, Some((*extractor).clone())));
         let cache = Arc::new(ResponseCache::new(
             config.cache.ttl_seconds,
@@ -41,6 +78,17 @@ impl AppState {
         ));
         let suggest = Arc::new(SuggestClient::new(http_client.clone()));
         let jobs = Arc::new(JobManager::new(http_client.clone()));
+
+        let cb_cfg = if let Some(ref cb) = config.circuit_breaker {
+            CbConfig {
+                failure_threshold: cb.failures as usize,
+                recovery_duration: std::time::Duration::from_secs(cb.recovery_seconds),
+                success_threshold: cb.successes as usize,
+            }
+        } else {
+            CbConfig::default()
+        };
+        let circuit_breaker_manager = Arc::new(CircuitBreakerManager::new(cb_cfg));
 
         Self {
             config: Arc::new(config),
@@ -51,6 +99,10 @@ impl AppState {
             extractor,
             suggest,
             jobs,
+            proxy_manager,
+            lane_store,
+            captcha_solver,
+            circuit_breaker_manager,
         }
     }
 }

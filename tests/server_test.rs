@@ -52,7 +52,7 @@ async fn test_server_parse_google_endpoint() {
     let state = AppState::new(config, vec![], http_client);
     let app = create_router(state);
 
-    let sample_html = std::fs::read_to_string("google/testdata/search_results.html")
+    let sample_html = std::fs::read_to_string("tests/fixtures/google/search_results.html")
         .expect("read google fixture");
 
     let response = app
@@ -151,4 +151,59 @@ async fn test_server_jobs_routes() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_server_stats_routes() {
+    let config = AppConfig::default();
+    let http_client = HttpClient::new(None, true, 10).expect("http client");
+    let state = AppState::new(config, vec![], http_client);
+    let app = create_router(state);
+
+    // 1. Test /stats
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri("/stats").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(val.get("cache").is_some());
+    assert!(val.get("proxy").is_some());
+    assert!(val.get("circuit_breakers").is_some());
+    assert!(val.get("captcha").is_some());
+
+    // 2. Test /stats/cache
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri("/stats/cache").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(val.get("entry_count").is_some());
+
+    // 3. Test /stats/proxy
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri("/stats/proxy").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(val.get("allow_request_proxy_url").is_some());
+    assert!(val.get("entries").is_some());
+
+    // 4. Test /stats/cb
+    let response = app
+        .oneshot(Request::builder().uri("/stats/cb").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(val.get("circuit_breakers").is_some());
 }

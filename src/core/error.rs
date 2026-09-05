@@ -68,6 +68,9 @@ pub enum SerpError {
     #[error("yaml error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 
+    #[error("challenge solving failed: {0}")]
+    ChallengeSolver(String),
+
     #[error("other error: {0}")]
     Other(String),
 }
