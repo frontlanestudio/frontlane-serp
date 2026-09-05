@@ -1,0 +1,12 @@
+pub const CAPTCHA: &str = "input[name='cf-turnstile-response']";
+pub const NO_RESULTS: &str = "[data-test-id='web-no-results']";
+pub const MAINLINE: &str = "[data-test-id='mainline']";
+pub const RESULT: &str = "[data-test-id='mainline-result-web']";
+pub const AD: &str = "[data-test-id='mainline-result-ad']";
+pub const RESULT_LINK: &str = "[data-test-id='result-link']";
+pub const TITLE: &str = "[data-test-id='result-title']";
+pub const DESC: &str = "[data-test-id='result-description']";
+pub const IMAGE_RESULT: &str = "[data-test-id='images-result']";
+pub const IMAGE_LINK: &str = "[data-test-id='image-result-link']";
+pub const IMAGE_SOURCE: &str = "[data-test-id='image-result-source']";
+pub const IMAGE_DIMS: &str = "[data-test-id='image-result-dimensions']";
