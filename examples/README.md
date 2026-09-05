@@ -1,19 +1,17 @@
-# OpenSERP Examples
+# Frontlane SERP Examples
 
-Short, copy-pasteable examples for using OpenSERP from JavaScript and Python.
-Each one runs against a local server by default and works the same against the
-[hosted API](#using-the-hosted-api) by swapping in an API key.
+Short, copy-pasteable examples for using Frontlane SERP from JavaScript and Python.
+Each one runs against a local server by default on `http://localhost:7000`.
 
 ## Start a server
 
-Most examples expect OpenSERP running on `http://localhost:7000`.
-
 ```bash
-# Docker
-docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
+# Build and run with cargo
+cargo build --release
+./target/release/frontlane-serp serve
 
-# Or from source
-go build -o openserp . && ./openserp serve
+# Or Docker
+docker run -p 127.0.0.1:7000:7000 -it frontlane-serp:latest serve
 ```
 
 Prefer not to run a server? Skip ahead to [Using the hosted API](#using-the-hosted-api).

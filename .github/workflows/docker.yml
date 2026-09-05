@@ -38,13 +38,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check tag matches cmd/root.go version
+      - name: Check tag matches Cargo.toml version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          CODE_VERSION=$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' cmd/root.go)
+          CODE_VERSION=$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' Cargo.toml | head -n 1)
           echo "tag=v${TAG_VERSION} code=${CODE_VERSION}"
           if [ "$TAG_VERSION" != "$CODE_VERSION" ]; then
-            echo "::error::Git tag v${TAG_VERSION} does not match version \"${CODE_VERSION}\" in cmd/root.go. Bump cmd/root.go before tagging."
+            echo "::error::Git tag v${TAG_VERSION} does not match version \"${CODE_VERSION}\" in Cargo.toml. Bump Cargo.toml before tagging."
             exit 1
           fi
 
@@ -98,7 +98,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: karust/openserp
+          images: |
+            frontlanestudio/frontlane-serp
+            ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

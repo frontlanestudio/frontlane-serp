@@ -1,12 +1,13 @@
 openapi: 3.0.3
 info:
-  title: OpenSERP API
-  version: 2.2.0
+  title: Frontlane SERP API
+  version: 0.1.0
   description: >
-    OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
-    Baidu, Bing, and DuckDuckGo. Search responses are wrapped in a v2 envelope with
-    query echo, metadata, normalized results, and pagination. Invalid client input
-    returns 400 with a machine-readable `reason` code.
+    Frontlane SERP provides dedicated and multi-engine search endpoints for Google, Bing,
+    DuckDuckGo, Yandex, Baidu, Ecosia, Hacker News, GitHub, Crates.io, and Wikipedia.
+    Search responses are wrapped in a v2 envelope with query echo, metadata, normalized
+    results, and pagination. Also includes domain crawling, keyword suggestions, smart rank
+    probing, batch job processing, and Serper/SerpApi compatibility layers.
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -18,7 +19,15 @@ tags:
   - name: Search
     description: Dedicated per-engine search endpoints
   - name: Mega
-    description: Cross-engine aggregated search endpoints
+    description: Cross-engine aggregated search endpoints with Reciprocal Rank Fusion (RRF)
+  - name: Crawl
+    description: Domain-bounded website crawler
+  - name: Rank
+    description: Smart rank probing and batch ranking
+  - name: Suggest
+    description: Autocomplete keyword suggestions
+  - name: Compat
+    description: Serper and SerpApi drop-in compatibility endpoints
   - name: Health
     description: Health and readiness endpoints
   - name: Stats
@@ -586,6 +595,201 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequestError"
 
+  /crawl:
+    post:
+      tags: [Crawl]
+      operationId: crawlSite
+      summary: Domain-bounded website crawl
+      description: >
+        Crawls a website using asynchronous breadth-first search within domain bounds.
+        Respects robots.txt, applies SSRF network protection, and extracts structured
+        metadata (JSON-LD, OpenGraph) and markdown content.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrawlOptions"
+      responses:
+        "200":
+          description: Crawl summary with crawled pages and discovered links
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlResult"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /{engine}/rank:
+    get:
+      tags: [Rank]
+      operationId: checkEngineRank
+      summary: Smart rank tracking and probing
+      description: Probes rankings for a target domain or URL with optional neighbor page windowing.
+      parameters:
+        - $ref: "#/components/parameters/EnginePath"
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Target domain or URL to locate in SERP
+        - name: keyword
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query keyword
+        - name: strategy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [smart, basic, custom]
+            default: smart
+        - name: match_mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [domain, subdomain, exact]
+            default: domain
+        - name: device
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [desktop, mobile]
+            default: desktop
+      responses:
+        "200":
+          description: Rank result with position, pages probed, and SERP features
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RankResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /{engine}/suggest:
+    get:
+      tags: [Suggest]
+      operationId: getKeywordSuggestions
+      summary: Autocomplete keyword suggestions
+      parameters:
+        - $ref: "#/components/parameters/EnginePath"
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Keyword prefix or prompt
+      responses:
+        "200":
+          description: List of autocomplete suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /v1/serper/search:
+    post:
+      tags: [Compat]
+      operationId: serperSearchCompat
+      summary: Serper API drop-in compatibility endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [q]
+              properties:
+                q:
+                  type: string
+                gl:
+                  type: string
+                hl:
+                  type: string
+                num:
+                  type: integer
+      responses:
+        "200":
+          description: Serper formatted search response
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/serpapi/search:
+    get:
+      tags: [Compat]
+      operationId: serpapiSearchCompat
+      summary: SerpApi drop-in compatibility endpoint
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: engine
+          in: query
+          schema:
+            type: string
+        - name: num
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SerpApi formatted search response
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/rank/batch:
+    post:
+      tags: [Rank]
+      operationId: createBatchRankJob
+      summary: Submit a batch of rank tracking checks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRankRequest"
+      responses:
+        "200":
+          description: Queued job receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobReceipt"
+
+  /v1/jobs/{id}:
+    get:
+      tags: [Rank]
+      operationId: getJobStatus
+      summary: Check asynchronous batch job status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job status and results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+
   /health:
     get:
       tags: [Health]
@@ -700,10 +904,10 @@ components:
       name: engine
       in: path
       required: true
-      description: Search engine endpoint alias (`duck` is DuckDuckGo).
+      description: Search engine endpoint alias (`duck`/`duckduckgo`, `hn`/`hackernews`, `gh`/`github`, `crates`, `wiki`/`wikipedia`).
       schema:
         type: string
-        enum: [google, yandex, baidu, bing, duck, ecosia]
+        enum: [google, yandex, baidu, bing, duck, duckduckgo, ecosia, hackernews, hn, github, gh, crates, wikipedia, wiki]
     TextQuery:
       name: text
       in: query
@@ -1236,6 +1440,116 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    CrawlOptions:
+      type: object
+      required: [start_url]
+      properties:
+        start_url:
+          type: string
+          example: https://example.com
+        allowed_domains:
+          type: array
+          items:
+            type: string
+        max_depth:
+          type: integer
+          default: 2
+        max_pages:
+          type: integer
+          default: 10
+        respect_robots:
+          type: boolean
+          default: true
+        extract_markdown:
+          type: boolean
+          default: true
+
+    CrawlResult:
+      type: object
+      properties:
+        start_url:
+          type: string
+        pages_crawled:
+          type: integer
+        took_ms:
+          type: integer
+        pages:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              depth:
+                type: integer
+              status:
+                type: integer
+              title:
+                type: string
+              content:
+                type: string
+              links:
+                type: array
+                items:
+                  type: string
+
+    RankResponse:
+      type: object
+      properties:
+        engine:
+          type: string
+        keyword:
+          type: string
+        target:
+          type: string
+        rank:
+          type: integer
+        found:
+          type: boolean
+        pages_probed:
+          type: array
+          items:
+            type: integer
+
+    BatchRankRequest:
+      type: object
+      required: [queries]
+      properties:
+        webhook_url:
+          type: string
+        queries:
+          type: array
+          items:
+            type: object
+            required: [engine, keyword, target]
+            properties:
+              engine:
+                type: string
+              keyword:
+                type: string
+              target:
+                type: string
+
+    JobReceipt:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+
+    JobStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+        total_tasks:
+          type: integer
+        completed_tasks:
+          type: integer
+
     # ── v2 envelope ──────────────────────────────────────────────────
     QueryEcho:
       type: object

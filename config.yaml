@@ -1,24 +1,14 @@
 server:
   host: 0.0.0.0 # API host to bind
   port: 7000 # API port to bind
-  debug: false # Enable debug logs and force browser UI mode
+  debug: false # Enable debug logs
   verbose: false # Enable debug-level request logs
-  raw_requests: false # true = raw HTTP mode, false = browser mode
+  raw_requests: true # Direct async HTTP mode
   insecure: true # Allow insecure TLS connections
 
 app:
   log_format: "text" # json|text
-  timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
-  browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
-  profiles: "" # Overriding built-in browser profiles
-  head: false # Headful mode
-  leakless: false # Force browser process cleanup after request
-  leave_head: false # Keep tabs open after request
-  block_resources: "image,font,css,media" # Block heavy subresources in browser mode
-  block_trackers: true # Block known tracker domains
-  max_processes: 6 # Concurrent Chrome processes
-  idle_ttl: 5m # close a Chrome that has not served traffic for this long
-
+  timeout: 15 # Search timeout in seconds, per attempt; the request deadline is derived from this x retries
   mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
 
 extract:
@@ -100,3 +90,19 @@ ecosia:
   rate_requests: 60
   rate_burst: 3
   # No proxy tag means direct traffic
+
+hackernews:
+  rate_requests: 120
+  rate_burst: 10
+
+github:
+  rate_requests: 60
+  rate_burst: 5
+
+crates:
+  rate_requests: 60
+  rate_burst: 5
+
+wikipedia:
+  rate_requests: 120
+  rate_burst: 10

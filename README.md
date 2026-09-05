@@ -1,78 +1,58 @@
-![OpenSERP](./logo.svg)
+![Frontlane SERP](./logo.svg)
 
-# OpenSERP
+# Frontlane SERP
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/karust/openserp.svg)](https://pkg.go.dev/github.com/karust/openserp)
-[![release](https://img.shields.io/github/v/release/karust/openserp)](https://github.com/karust/openserp/releases)
-[![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/r/karust/openserp)
-[![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
-[![Telegram](https://img.shields.io/badge/Telegram-openserp__cloud-26A5E4?logo=telegram&logoColor=white)](https://t.me/openserp_cloud)
+[![CI](https://github.com/frontlanestudio/frontlane-serp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/frontlanestudio/frontlane-serp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/frontlanestudio/frontlane-serp)](https://github.com/frontlanestudio/frontlane-serp/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**OpenSERP** is a free, open-source SERP API and CLI for Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia.
+**Frontlane SERP** is a fast, open-source SERP API, CLI, and Model Context Protocol (MCP) server written in pure async Rust for Google, Bing, DuckDuckGo, Yandex, Baidu, Ecosia, Hacker News, GitHub, Crates.io, and Wikipedia.
 
-No API keys, no per-search billing: one command gives you live, structured search results on localhost - including engines the paid APIs don't cover. Use it as a search tool for LLMs and agents, or as a backend for SEO rank tracking. If you'd rather not run infrastructure, there is a [hosted version](https://openserp.org/cloud) with the same API.
+No API keys, no per-search billing: one command gives you live, structured search results on localhost - including engines the paid APIs don't cover. Use it as a search and retrieval tool for LLMs and AI agents, or as a backend for SEO rank tracking and site crawling.
 
-![OpenSERP CLI demo](./docs/demo.gif)
+![Frontlane SERP CLI demo](./docs/demo.gif)
 
 ## Features
 
-- Dedicated endpoints for six engines, same JSON schema across all of them
-- **Megasearch** - one query across several engines at once, merged and deduped
-- **URL extraction** - search results plus clean markdown of the target pages in one call
-- SERP features: AI summaries, answer boxes, people-also-ask, related searches
-- Image search, filters (language, date range, file type, site), **JSON/Markdown/Text/NdJSON** output
-- Proxies, cache, resilient mode, prebuilt Docker images
-
-## 🚀 Frontlane SERP Breakthrough Features
-
-Built in Rust for maximum speed and zero memory overhead, **Frontlane SERP** incorporates advanced SEO platform capabilities inspired by SerpBear, OpenSEO, s33k, CrawlSEO, and Bisibility:
-
-1. **Drop-In Serper & SerpApi Compatibility Layers**
-   - Seamlessly point tools like **SerpBear**, **OpenSEO**, **s33k**, **Bisibility**, or **LangChain** directly to Frontlane SERP to eliminate 100% of 3rd-party API bills.
-   - Endpoints: `POST /v1/serper/search` & `GET /v1/serpapi/search`.
-2. **Native Smart Probing (`/{engine}/rank`)**
-   - Intelligently probes rankings using target neighbor page windows (`[P-1, P, P+1]`) to cut crawling volume by 70–90%.
-   - Supports subdomain wildcards, exact URL matching, mobile vs. desktop emulation, and SERP feature attribution.
-   - CLI: `frontlane-serp rank example.com "keyword" --strategy smart`
-3. **Keyword Autocomplete & Suggestion Engine (`/{engine}/suggest`)**
-   - Blazing-fast keyword expansion across Google, Bing, DuckDuckGo, and Ecosia with zero proxy friction.
-   - CLI: `frontlane-serp suggest "rust programming" --engine google`
-4. **Native Model Context Protocol (MCP) Server**
-   - Connect directly from **Claude Desktop**, **Cursor**, **Antigravity**, or **Claude Code** via standard I/O:
-   - CLI: `frontlane-serp mcp`
-   - Tools: `serp_search`, `check_rank`, `suggest_keywords`, `extract_content`, `mega_search`.
-5. **Embedded Asynchronous Batch Job Queue & Webhooks**
-   - Queue hundreds of ranking checks with bounded concurrency and automatic outbound webhook delivery on completion.
-   - Endpoints: `POST /v1/rank/batch` & `GET /v1/jobs/:id`.
+- **10 Search Engines**: Google, Bing, DuckDuckGo, Yandex, Baidu, Ecosia, Hacker News, GitHub, Crates.io, and Wikipedia.
+- **Megasearch with RRF**: One query across several engines at once with **Reciprocal Rank Fusion (RRF)** and engine consensus scoring.
+- **Deep Content & Metadata Extraction**: Search results plus clean markdown, OpenGraph tags, Twitter cards, and Schema.org JSON-LD structured data.
+- **Domain-Restricted Web Crawler**: Async BFS crawler with depth limits, domain filtering, robots.txt compliance, and SSRF guard protection.
+- **Smart Rank Probing**: Probes rankings using target neighbor page windows (`[P-1, P, P+1]`) to cut crawling volume by 70–90%.
+- **Keyword Autocomplete**: Instant suggestion expansion across Google, Bing, DuckDuckGo, and Ecosia.
+- **Native MCP Server**: Instant integration for Claude Desktop, Cursor, Antigravity, and Claude Code (`frontlane-serp mcp`).
+- **Drop-In Serper & SerpApi Compatibility**: Drop-in emulation for `POST /v1/serper/search` and `GET /v1/serpapi/search`.
+- **Embedded Batch Jobs**: Asynchronous rank-tracking queue with bounded concurrency and webhook notifications.
 
 ## Quick Start
 
+### Build From Source (Rust)
+
+Requires Rust 1.80+:
+
+```sh
+git clone https://github.com/frontlanestudio/frontlane-serp.git
+cd frontlane-serp
+cargo build --release
+./target/release/frontlane-serp serve
+```
+
+### Install via Cargo
+
+```sh
+cargo install --git https://github.com/frontlanestudio/frontlane-serp.git
+frontlane-serp search duckduckgo "rust async web" --format markdown
+```
+
 ### Docker
 
-Prebuilt images are published to [docker hub: `karust/openserp`](https://hub.docker.com/r/karust/openserp).
-
 ```sh
-# Run the API server via prebuilt image
-docker run --rm -p 127.0.0.1:7000:7000 karust/openserp:latest serve -a 0.0.0.0 -p 7000
+# Build and run locally
+docker build -t frontlane-serp .
+docker run --rm -p 127.0.0.1:7000:7000 frontlane-serp:latest serve
 
-# Or
+# Or with docker compose
 docker compose up
-```
-
-### Go install
-
-```sh
-go install github.com/karust/openserp@latest
-openserp search duckduckgo "open source serp api" --format markdown
-```
-
-### From Source
-
-```sh
-git clone https://github.com/karust/openserp.git
-cd openserp
-go build -o openserp .
-./openserp serve
 ```
 
 ### First request
@@ -328,25 +308,39 @@ More CLI examples:
 
 ```sh
 # JSON is the default format
-openserp search google "golang generics" --limit 20
+frontlane-serp search google "rust async web" --limit 20
+
+# Developer engines: Hacker News & GitHub
+frontlane-serp search hn "show hn AI" --limit 10
+frontlane-serp search gh "serp scraper" --limit 10
+frontlane-serp search crates "tokio" --limit 5
+frontlane-serp search wiki "Rust (programming language)" --limit 5
 
 # Plain text, German results
-openserp search yandex "wetter berlin" --format text --lang DE --region DE
+frontlane-serp search yandex "wetter berlin" --format text --lang DE --region DE
 
 # Restrict to a site and stream NdJSON
-openserp search bing "release notes" --site github.com --format ndjson
+frontlane-serp search bing "release notes" --site github.com --format ndjson
 
-# Embed clean page content from the top 2 results
-openserp search google "llm observability" --extract 2 --format markdown
+# Embed clean page content & metadata from the top 2 results
+frontlane-serp search google "llm observability" --extract 2 --format markdown
 
-# Browserless (raw HTTP) mode through a proxy
-# (raw mode: google, yandex, baidu, ecosia)
-openserp search ecosia "weather in london" --raw --proxy http://user:pass@127.0.0.1:8080
+# Rank checking with smart neighbor probing
+frontlane-serp rank github.com "rust serp api" --engine google --strategy smart
+
+# Keyword suggestions
+frontlane-serp suggest "async rust" --engine google
+
+# Domain-bounded website crawl
+frontlane-serp crawl https://example.com --max-depth 2 --max-pages 10
+
+# Launch MCP server for Claude Desktop / Cursor / Antigravity
+frontlane-serp mcp
 ```
 
 </details>
 
-Run `openserp search --help` for the full flag list. Engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
+Run `frontlane-serp search --help` for the full flag list. Engine names: `google`, `bing`, `duckduckgo` (`ddg`), `yandex`, `baidu`, `ecosia`, `hackernews` (`hn`), `github` (`gh`), `crates`, `wikipedia` (`wiki`).
 
 ## Query Parameters
 
@@ -354,34 +348,27 @@ Common parameters:
 
 | Parameter      | Description                                                                                                                                                                                             | Example                              |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `text`         | Search query                                                                                                                                                                                            | `golang programming`                 |
+| `text`         | Search query                                                                                                                                                                                            | `rust programming`                   |
 | `lang`         | Language code                                                                                                                                                                                           | `EN`, `DE`, `RU`, `ES`               |
 | `region`       | Market/location hint. Countries/locales work across engines; Google also accepts city names via `uule`; Yandex accepts numeric `lr`.                                                                    | `DE`, `en-GB`, `Berlin`, `213`       |
 | `date`         | Date range                                                                                                                                                                                              | `20250101..20251231`                 |
 | `file`         | File extension                                                                                                                                                                                          | `pdf`, `doc`, `xls`                  |
 | `site`         | Site-specific search                                                                                                                                                                                    | `github.com`                         |
-| `limit`        | Number of organic results, max 100. When omitted or `<=10`, only the first SERP page is parsed.                                                                                                         | `25`, `50`                           |
+| `limit`        | Number of organic results, max 100.                                                                                                                                                                     | `25`, `50`                           |
 | `start`        | Pagination offset                                                                                                                                                                                       | `0`, `10`, `20`                      |
 | `format`       | Output format                                                                                                                                                                                           | `json`, `markdown`, `text`, `ndjson` |
-| `extract`      | Fetch and embed target-page content for top web results. Bool or int depth: `0`/`false` off, `true`/`1` top result, `N` top N (1-5). `extract_mode`/`min_runes` imply `extract=true` unless `extract=0` | `1`, `3`, `true`                     |
+| `extract`      | Fetch and embed target-page content & metadata for top web results. Depth: `0`/`false` off, `true`/`1` top result, `N` top N (1-5).                                                                    | `1`, `3`, `true`                     |
 | `extract_mode` | Extraction strategy: raw HTTP first, raw only, or browser-rendered                                                                                                                                      | `auto`, `fast`, `rendered`           |
-
-Engine-specific parameters:
-
-| Parameter  | Supported engines | Notes                                                                  |
-| ---------- | ----------------- | ---------------------------------------------------------------------- |
-| `filter`   | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
-| `features` | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.     |
 
 ## Proxy Support
 
-OpenSERP supports HTTP and SOCKS5 proxies.
+Frontlane SERP supports HTTP, HTTPS, and SOCKS5 proxies.
 
 Simple global proxy:
 
 ```bash
-./openserp serve --proxy socks5://127.0.0.1:1080
-./openserp search bing "query" --proxy http://user:pass@127.0.0.1:8080
+frontlane-serp serve --proxy socks5://127.0.0.1:1080
+frontlane-serp search bing "query" --proxy http://user:pass@127.0.0.1:8080
 ```
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
@@ -390,17 +377,10 @@ Advanced proxy configuration is available in [config.yaml](./config.yaml). You c
 
 Once the server is running, the interactive docs are available locally:
 
-- Swagger UI: `http://127.0.0.1:7000/docs` - full schemas, error shapes, and the `/health`, `/ready`, `/stats/*` endpoints
+- Swagger UI: `http://127.0.0.1:7000/docs`
 - OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
 
-To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
-
-## Self-Hosted or Cloud
-
-- **Self-hosted (this repo)** - free, MIT-licensed, full control over runtime, proxies, cache, and scaling.
-- **[OpenSERP Cloud](https://openserp.org/cloud)** - same endpoints and response schema, no infrastructure to run.
-
-Client code migrates in either direction, so you are never locked in.
+To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For architecture details, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## License
 
@@ -410,10 +390,6 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
-## Feedback & Updates
+## Feedback & Community
 
-- [GitHub Issues](https://github.com/karust/openserp/issues) - bugs, feature ideas, and reproducible issues.
-- [feedback@openserp.org](mailto:feedback@openserp.org) - private notes, longer feedback, or anything that does not fit GitHub Issues.
-- [Telegram](https://t.me/openserp_cloud) - OpenSERP news, release notes, and project updates.
-
-> OpenSERP is free and open-source. Only links listed in this repository and on [openserp.org](https://openserp.org) are associated with the project.
+- [GitHub Issues](https://github.com/frontlanestudio/frontlane-serp/issues) - bugs, feature ideas, and reproducible issues.
