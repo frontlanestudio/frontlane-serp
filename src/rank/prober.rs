@@ -50,6 +50,7 @@ pub async fn probe_engine_rank(
     let mut pages_scraped = Vec::new();
     let mut all_serp_features = Vec::new();
     let mut feature_citations = Vec::new();
+    let mut serp_results = Vec::new();
 
     let mut ranked_hit = None;
 
@@ -112,14 +113,41 @@ pub async fn probe_engine_rank(
         let (items, features) = probe_single_page(&engine, req, *page).await?;
         all_serp_features.extend(features);
 
+        let mut target_found_on_page = false;
         for item in items {
-            if matches_target(&item.url, &req.target, req.r#match) {
-                ranked_hit = Some(item);
-                break;
+            let is_target = matches_target(&item.url, &req.target, req.r#match);
+            let rank = if item.rank > 0 {
+                item.rank
+            } else if let Some(ref pos) = item.position {
+                pos.absolute
+            } else {
+                serp_results.len() + 1
+            };
+
+            if is_target && ranked_hit.is_none() {
+                ranked_hit = Some(item.clone());
+                target_found_on_page = true;
             }
+
+            serp_results.push(crate::rank::types::SerpRankResultItem {
+                rank,
+                url: item.url,
+                title: item.title,
+                snippet: if item.snippet.is_empty() {
+                    None
+                } else {
+                    Some(item.snippet)
+                },
+                domain: if item.domain.is_empty() {
+                    None
+                } else {
+                    Some(item.domain)
+                },
+                is_target,
+            });
         }
 
-        if ranked_hit.is_some() {
+        if target_found_on_page {
             break;
         }
     }
@@ -133,14 +161,41 @@ pub async fn probe_engine_rank(
                 let (items, features) = probe_single_page(&engine, req, page).await?;
                 all_serp_features.extend(features);
 
+                let mut target_found_on_page = false;
                 for item in items {
-                    if matches_target(&item.url, &req.target, req.r#match) {
-                        ranked_hit = Some(item);
-                        break;
+                    let is_target = matches_target(&item.url, &req.target, req.r#match);
+                    let rank = if item.rank > 0 {
+                        item.rank
+                    } else if let Some(ref pos) = item.position {
+                        pos.absolute
+                    } else {
+                        serp_results.len() + 1
+                    };
+
+                    if is_target && ranked_hit.is_none() {
+                        ranked_hit = Some(item.clone());
+                        target_found_on_page = true;
                     }
+
+                    serp_results.push(crate::rank::types::SerpRankResultItem {
+                        rank,
+                        url: item.url,
+                        title: item.title,
+                        snippet: if item.snippet.is_empty() {
+                            None
+                        } else {
+                            Some(item.snippet)
+                        },
+                        domain: if item.domain.is_empty() {
+                            None
+                        } else {
+                            Some(item.domain)
+                        },
+                        is_target,
+                    });
                 }
 
-                if ranked_hit.is_some() {
+                if target_found_on_page {
                     break;
                 }
             }
@@ -211,6 +266,7 @@ pub async fn probe_engine_rank(
         feature_citations,
         pages_scraped,
         took_ms,
+        serp_results,
     })
 }
 

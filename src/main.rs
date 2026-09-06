@@ -314,21 +314,36 @@ async fn handle_rank(
         .map_err(|e| format!("{e}"))?;
     if args.format == CliFormat::Json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.ranked {
-        println!(
-            "🎯 RANK #{} | Target: {} | Engine: {} | URL: {}",
-            resp.rank.unwrap_or(0),
-            resp.target,
-            resp.engine,
-            resp.url.as_deref().unwrap_or("")
-        );
     } else {
-        println!(
-            "❌ NOT RANKED | Target: {} | Checked {} pages | Engine: {}",
-            resp.target,
-            resp.pages_scraped.len(),
-            resp.engine
-        );
+        if resp.ranked {
+            println!(
+                "🎯 RANK #{} | Target: {} | Engine: {} | URL: {}",
+                resp.rank.unwrap_or(0),
+                resp.target,
+                resp.engine,
+                resp.url.as_deref().unwrap_or("")
+            );
+        } else {
+            println!(
+                "❌ NOT RANKED | Target: {} | Checked {} pages | Engine: {}",
+                resp.target,
+                resp.pages_scraped.len(),
+                resp.engine
+            );
+        }
+
+        if !resp.serp_results.is_empty() {
+            println!("\nTop SERP Results ({}):", resp.serp_results.len());
+            for res in &resp.serp_results {
+                let badge = if res.is_target { " 🎯 [TARGET]" } else { "" };
+                let domain_str = res
+                    .domain
+                    .as_deref()
+                    .map(|d| format!(" ({})", d))
+                    .unwrap_or_default();
+                println!("  #{}: {} - {}{}{}", res.rank, res.url, res.title, domain_str, badge);
+            }
+        }
     }
 
     Ok(())
@@ -463,6 +478,8 @@ struct BatchRankResultItem {
     timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    serp_results: Vec<frontlane_serp::rank::SerpRankResultItem>,
 }
 
 async fn handle_batch_rank(
@@ -624,7 +641,30 @@ async fn handle_batch_rank(
                     } else {
                         "❌ Unranked".to_string()
                     };
-                    eprintln!("{} ({}ms)", rank_str, elapsed.as_millis());
+
+                    let top_preview = if !resp.serp_results.is_empty() {
+                        let top_domains: Vec<&str> = resp
+                            .serp_results
+                            .iter()
+                            .take(3)
+                            .filter_map(|r| r.domain.as_deref())
+                            .collect();
+                        if !top_domains.is_empty() {
+                            format!(" [Top: {}]", top_domains.join(", "))
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    eprintln!("{}{}({}ms)", rank_str, top_preview, elapsed.as_millis());
+
+                    let serp_slice = if args.top_results > 0 {
+                        resp.serp_results.into_iter().take(args.top_results).collect()
+                    } else {
+                        Vec::new()
+                    };
 
                     results.push(BatchRankResultItem {
                         keyword: item.keyword.clone(),
@@ -640,6 +680,7 @@ async fn handle_batch_rank(
                         took_ms: elapsed.as_millis() as u64,
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         error: None,
+                        serp_results: serp_slice,
                     });
                     break;
                 }
@@ -672,6 +713,7 @@ async fn handle_batch_rank(
                             took_ms: elapsed.as_millis() as u64,
                             timestamp: chrono::Utc::now().to_rfc3339(),
                             error: Some(err_msg),
+                            serp_results: Vec::new(),
                         });
                         break;
                     }

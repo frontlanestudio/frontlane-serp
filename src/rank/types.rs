@@ -54,6 +54,19 @@ fn default_pagination_limit() -> usize {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerpRankResultItem {
+    pub rank: usize,
+    pub url: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub is_target: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankResponse {
     pub target: String,
     pub query: String,
@@ -67,4 +80,6 @@ pub struct RankResponse {
     pub feature_citations: Vec<String>,
     pub pages_scraped: Vec<usize>,
     pub took_ms: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serp_results: Vec<SerpRankResultItem>,
 }

@@ -98,6 +98,10 @@ pub struct BatchRankArgs {
     #[arg(short, long)]
     pub output: Option<String>,
 
+    /// Include top N SERP competitor results per keyword (default: 10, 0 to disable)
+    #[arg(long, default_value = "10")]
+    pub top_results: usize,
+
     /// Output format to console
     #[arg(short = 'F', long, value_enum, default_value = "text")]
     pub format: CliFormat,
