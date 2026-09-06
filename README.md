@@ -333,6 +333,9 @@ frontlane-serp search google "llm observability" --extract 2 --format markdown
 # Smart rank checking
 frontlane-serp rank github.com "rust serp api" --engine google --strategy smart
 
+# Automated batch rank tracking from file (CSV, JSON, or TXT)
+frontlane-serp batch-rank --target calljacob.com --file calljacob_keywords.csv --engine duckduckgo --output results.json
+
 # Keyword suggestions
 frontlane-serp suggest "async rust" --engine google
 

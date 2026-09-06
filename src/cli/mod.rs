@@ -50,8 +50,46 @@ pub enum Commands {
     /// Crawl a website within domain bounds
     Crawl(CrawlArgs),
 
+    /// Run batch rank tracking from a file or list of keywords
+    BatchRank(BatchRankArgs),
+
     /// Run as a Model Context Protocol (MCP) server over stdio
     Mcp,
+}
+
+#[derive(Args, Debug)]
+pub struct BatchRankArgs {
+    /// Target domain or URL (e.g. calljacob.com)
+    #[arg(short, long)]
+    pub target: String,
+
+    /// Input file containing keywords (.csv, .json, or .txt line-separated)
+    #[arg(short, long)]
+    pub file: String,
+
+    /// Search engine: duckduckgo, google, bing, ecosia, etc.
+    #[arg(short, long, default_value = "duckduckgo")]
+    pub engine: String,
+
+    /// Maximum pages to probe per keyword (default 3)
+    #[arg(short, long, default_value = "3")]
+    pub limit: usize,
+
+    /// Maximum keywords to process (omit for all)
+    #[arg(long)]
+    pub max: Option<usize>,
+
+    /// Delay in milliseconds between queries
+    #[arg(long, default_value = "300")]
+    pub delay_ms: u64,
+
+    /// Optional output file to write results (.json or .csv)
+    #[arg(short, long)]
+    pub output: Option<String>,
+
+    /// Output format to console
+    #[arg(short, long, value_enum, default_value = "text")]
+    pub format: CliFormat,
 }
 
 #[derive(Args, Debug)]

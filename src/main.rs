@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, RankArgs, SearchArgs, SuggestArgs,
+    BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, RankArgs, SearchArgs,
+    SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -109,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Crawl(crawl_args)) => {
             handle_crawl(&crawl_args, &http_client).await?;
+        }
+        Some(Commands::BatchRank(batch_args)) => {
+            handle_batch_rank(&batch_args, &engines).await?;
         }
         Some(Commands::Mcp) => {
             handle_mcp(&engines, &http_client).await?;
@@ -422,6 +426,253 @@ async fn handle_crawl(
             }
             println!();
         }
+    }
+
+    Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+struct BatchKeywordItem {
+    keyword: String,
+    #[serde(default)]
+    target_url: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    target_geo: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+struct BatchRankResultItem {
+    keyword: String,
+    category: Option<String>,
+    priority: Option<String>,
+    target_geo: Option<String>,
+    target_url: Option<String>,
+    ranked: bool,
+    rank: Option<usize>,
+    serp_url: Option<String>,
+    title: Option<String>,
+    pages_scraped: usize,
+    took_ms: u64,
+    timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn handle_batch_rank(
+    args: &BatchRankArgs,
+    engines: &[Arc<dyn SearchEngine>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let norm_engine = match args.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = engines
+        .iter()
+        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
+        .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
+        .clone();
+
+    let file_content = tokio::fs::read_to_string(&args.file)
+        .await
+        .map_err(|e| format!("Failed to read keywords file '{}': {}", args.file, e))?;
+
+    let mut items: Vec<BatchKeywordItem> = Vec::new();
+
+    if args.file.ends_with(".csv") {
+        let lines: Vec<&str> = file_content.lines().collect();
+        if !lines.is_empty() {
+            let header: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
+            let kw_idx = header
+                .iter()
+                .position(|&h| h.eq_ignore_ascii_case("keyword"))
+                .unwrap_or(0);
+            let url_idx = header
+                .iter()
+                .position(|&h| h.eq_ignore_ascii_case("target_url"));
+            let cat_idx = header
+                .iter()
+                .position(|&h| h.eq_ignore_ascii_case("category"));
+            let prio_idx = header
+                .iter()
+                .position(|&h| h.eq_ignore_ascii_case("priority"));
+            let geo_idx = header
+                .iter()
+                .position(|&h| h.eq_ignore_ascii_case("target_geo"));
+
+            for line in &lines[1..] {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let cols: Vec<&str> = trimmed
+                    .split(',')
+                    .map(|c| c.trim().trim_matches('"'))
+                    .collect();
+                if cols.len() > kw_idx && !cols[kw_idx].is_empty() {
+                    items.push(BatchKeywordItem {
+                        keyword: cols[kw_idx].to_string(),
+                        target_url: url_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                        category: cat_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                        priority: prio_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                        target_geo: geo_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                    });
+                }
+            }
+        }
+    } else if args.file.ends_with(".json") {
+        items = serde_json::from_str(&file_content)
+            .map_err(|e| format!("Failed to parse JSON keyword list: {}", e))?;
+    } else {
+        // Plain text line-separated
+        for line in file_content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                items.push(BatchKeywordItem {
+                    keyword: trimmed.to_string(),
+                    target_url: None,
+                    category: None,
+                    priority: None,
+                    target_geo: None,
+                });
+            }
+        }
+    }
+
+    if let Some(max) = args.max {
+        items.truncate(max);
+    }
+
+    let total = items.len();
+    if total == 0 {
+        eprintln!("No keywords found in '{}'.", args.file);
+        return Ok(());
+    }
+
+    eprintln!(
+        "🚀 Starting batch rank tracking for {} keywords on target '{}' using engine '{}'...",
+        total, args.target, norm_engine
+    );
+
+    let mut results: Vec<BatchRankResultItem> = Vec::with_capacity(total);
+
+    for (idx, item) in items.into_iter().enumerate() {
+        let count = idx + 1;
+        let cat_label = item.category.as_deref().unwrap_or("General");
+        eprint!(
+            "[{}/{}] '{}' ({}) ... ",
+            count, total, item.keyword, cat_label
+        );
+
+        let req = RankRequest {
+            target: args.target.clone(),
+            q: item.keyword.clone(),
+            strategy: RankStrategy::Smart,
+            last_rank: 0,
+            pagination_limit: args.limit,
+            smart_full_fallback: false,
+            r#match: DomainMatchMode::Subdomain,
+            device: DeviceType::Desktop,
+            region: "US".to_string(),
+            lang: "en".to_string(),
+        };
+
+        let mut retries = 0;
+        let max_retries = 3;
+
+        loop {
+            let start_t = std::time::Instant::now();
+            let rank_res = probe_engine_rank(engine.clone(), &req).await;
+            let elapsed = start_t.elapsed();
+
+            match rank_res {
+                Ok(resp) => {
+                    let rank_str = if resp.ranked {
+                        format!("🎯 Rank #{}", resp.rank.unwrap_or(0))
+                    } else {
+                        "❌ Unranked".to_string()
+                    };
+                    eprintln!("{} ({}ms)", rank_str, elapsed.as_millis());
+
+                    results.push(BatchRankResultItem {
+                        keyword: item.keyword.clone(),
+                        category: item.category.clone(),
+                        priority: item.priority.clone(),
+                        target_geo: item.target_geo.clone(),
+                        target_url: item.target_url.clone(),
+                        ranked: resp.ranked,
+                        rank: resp.rank,
+                        serp_url: resp.url,
+                        title: resp.title,
+                        pages_scraped: resp.pages_scraped.len(),
+                        took_ms: elapsed.as_millis() as u64,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        error: None,
+                    });
+                    break;
+                }
+                Err(e) => {
+                    let err_msg = format!("{e}");
+                    retries += 1;
+                    if retries <= max_retries
+                        && (err_msg.contains("captcha")
+                            || err_msg.contains("Blocked")
+                            || err_msg.contains("Forbidden")
+                            || err_msg.contains("reset"))
+                    {
+                        let backoff_secs = 5 * retries;
+                        eprintln!("⏳ Rate limited ({err_msg}). Backing off for {backoff_secs}s before retry {retries}/{max_retries}...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs as u64))
+                            .await;
+                    } else {
+                        eprintln!("⚠️  Error: {}", err_msg);
+                        results.push(BatchRankResultItem {
+                            keyword: item.keyword.clone(),
+                            category: item.category.clone(),
+                            priority: item.priority.clone(),
+                            target_geo: item.target_geo.clone(),
+                            target_url: item.target_url.clone(),
+                            ranked: false,
+                            rank: None,
+                            serp_url: None,
+                            title: None,
+                            pages_scraped: 0,
+                            took_ms: elapsed.as_millis() as u64,
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            error: Some(err_msg),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Periodically write intermediate progress every 5 queries
+        if let Some(ref out_path) = args.output {
+            if count % 5 == 0 || count == total {
+                if let Ok(json_data) = serde_json::to_string_pretty(&results) {
+                    let _ = tokio::fs::write(out_path, json_data).await;
+                }
+            }
+        }
+
+        if args.delay_ms > 0 && count < total {
+            tokio::time::sleep(tokio::time::Duration::from_millis(args.delay_ms)).await;
+        }
+    }
+
+    if let Some(ref out_path) = args.output {
+        let json_data = serde_json::to_string_pretty(&results)?;
+        tokio::fs::write(out_path, json_data).await?;
+        eprintln!("\n✅ Saved {} results to '{}'.", results.len(), out_path);
+    }
+
+    if args.format == CliFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
     }
 
     Ok(())
