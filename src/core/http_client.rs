@@ -40,6 +40,7 @@ pub struct HttpClient {
     client: Client,
     default_ua: String,
     platform: BrowserPlatform,
+    flareprox_gateway: Option<String>,
 }
 
 impl HttpClient {
@@ -59,11 +60,17 @@ impl HttpClient {
             .gzip(true)
             .brotli(true);
 
+        let mut flareprox_gateway = None;
         if let Some(proxy) = proxy_url {
-            if !proxy.trim().is_empty() {
-                let req_proxy = Proxy::all(proxy)
-                    .map_err(|e| SerpError::ProxyConnect(format!("invalid proxy URL: {}", e)))?;
-                builder = builder.proxy(req_proxy);
+            let p = proxy.trim();
+            if !p.is_empty() {
+                if crate::flareprox::is_flareprox_url(p) {
+                    flareprox_gateway = Some(crate::flareprox::normalize_flareprox_url(p));
+                } else {
+                    let req_proxy = Proxy::all(p)
+                        .map_err(|e| SerpError::ProxyConnect(format!("invalid proxy URL: {}", e)))?;
+                    builder = builder.proxy(req_proxy);
+                }
             }
         }
 
@@ -103,7 +110,17 @@ impl HttpClient {
             client,
             default_ua,
             platform,
+            flareprox_gateway,
         })
+    }
+
+    pub fn with_flareprox_gateway(mut self, gateway_url: Option<String>) -> Self {
+        self.flareprox_gateway = gateway_url.map(|u| crate::flareprox::normalize_flareprox_url(&u));
+        self
+    }
+
+    pub fn flareprox_gateway(&self) -> Option<&str> {
+        self.flareprox_gateway.as_deref()
     }
 
     pub fn inner(&self) -> &Client {
@@ -119,7 +136,11 @@ impl HttpClient {
     }
 
     pub async fn get(&self, url: &str) -> reqwest::Result<reqwest::Response> {
-        self.client.get(url).send().await
+        if let Some(ref gateway) = self.flareprox_gateway {
+            self.client.get(gateway).header("X-Target-URL", url).send().await
+        } else {
+            self.client.get(url).send().await
+        }
     }
 
     pub async fn post_json<T: serde::Serialize>(
@@ -127,7 +148,11 @@ impl HttpClient {
         url: &str,
         body: &T,
     ) -> reqwest::Result<reqwest::Response> {
-        self.client.post(url).json(body).send().await
+        if let Some(ref gateway) = self.flareprox_gateway {
+            self.client.post(gateway).header("X-Target-URL", url).json(body).send().await
+        } else {
+            self.client.post(url).json(body).send().await
+        }
     }
 
     pub async fn fetch(&self, url: &str, lang: Option<&str>) -> Result<String> {
@@ -169,7 +194,16 @@ impl HttpClient {
         cookies: Option<&str>,
         extra_headers: Option<HeaderMap>,
     ) -> Result<(reqwest::StatusCode, String)> {
-        let mut req = self.client.get(url);
+        let (request_url, target_url_header) = if let Some(ref gateway) = self.flareprox_gateway {
+            (gateway.as_str(), Some(url))
+        } else {
+            (url, None)
+        };
+
+        let mut req = self.client.get(request_url);
+        if let Some(target) = target_url_header {
+            req = req.header("X-Target-URL", target);
+        }
 
         if let Some(ua) = custom_ua {
             if !ua.trim().is_empty() {
@@ -206,5 +240,62 @@ impl HttpClient {
         let status = resp.status();
         let body = resp.text().await?;
         Ok((status, body))
+    }
+
+    pub async fn fetch_raw_response_with_proxy(
+        &self,
+        url: &str,
+        proxy_override: Option<&str>,
+        lang: Option<&str>,
+        custom_ua: Option<&str>,
+        cookies: Option<&str>,
+        extra_headers: Option<HeaderMap>,
+    ) -> Result<(reqwest::StatusCode, String)> {
+        if let Some(p) = proxy_override {
+            let clean = p.trim();
+            if !clean.is_empty() && crate::flareprox::is_flareprox_url(clean) {
+                let gateway = crate::flareprox::normalize_flareprox_url(clean);
+                let mut req = self.client.get(&gateway).header("X-Target-URL", url);
+
+                if let Some(ua) = custom_ua {
+                    if !ua.trim().is_empty() {
+                        if let Ok(val) = HeaderValue::from_str(ua) {
+                            req = req.header(USER_AGENT, val);
+                        }
+                    }
+                }
+
+                if let Some(cookie_str) = cookies {
+                    if !cookie_str.trim().is_empty() {
+                        if let Ok(val) = HeaderValue::from_str(cookie_str) {
+                            req = req.header(COOKIE, val);
+                        }
+                    }
+                }
+
+                if let Some(l) = lang {
+                    let accept_lang = build_accept_language_header(l);
+                    if !accept_lang.is_empty() {
+                        req = req.header(ACCEPT_LANGUAGE, accept_lang);
+                    }
+                }
+
+                if let Some(headers) = extra_headers {
+                    for (name, value) in headers.iter() {
+                        if let Ok(hname) = HeaderName::from_bytes(name.as_ref()) {
+                            req = req.header(hname, value.clone());
+                        }
+                    }
+                }
+
+                let resp = req.send().await?;
+                let status = resp.status();
+                let body = resp.text().await?;
+                return Ok((status, body));
+            }
+        }
+
+        self.fetch_raw_response(url, lang, custom_ua, cookies, extra_headers)
+            .await
     }
 }

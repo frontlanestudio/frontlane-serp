@@ -5,6 +5,7 @@ pub mod core;
 pub mod crawl;
 pub mod engines;
 pub mod extract;
+pub mod flareprox;
 pub mod jobs;
 pub mod mcp;
 pub mod mega;

@@ -22,6 +22,8 @@ pub struct AppConfig {
     pub cors: CorsConfig,
     #[serde(default)]
     pub captcha: CaptchaConfig,
+    #[serde(default)]
+    pub flareprox: crate::flareprox::FlareProxConfig,
     #[serde(flatten)]
     pub engines: HashMap<String, EngineConfig>,
 }
@@ -439,6 +441,16 @@ impl AppConfig {
         if let Ok(debug) = std::env::var("OPENSERP_DEBUG") {
             self.server.debug = debug == "1" || debug.eq_ignore_ascii_case("true");
         }
+        if let Ok(token) =
+            std::env::var("CLOUDFLARE_API_TOKEN").or_else(|_| std::env::var("CF_API_TOKEN"))
+        {
+            self.flareprox.api_token = Some(token);
+        }
+        if let Ok(account) =
+            std::env::var("CLOUDFLARE_ACCOUNT_ID").or_else(|_| std::env::var("CF_ACCOUNT_ID"))
+        {
+            self.flareprox.account_id = Some(account);
+        }
     }
 }
 
@@ -462,6 +474,7 @@ impl Default for AppConfig {
             circuit_breaker: None,
             cors: CorsConfig::default(),
             captcha: CaptchaConfig::default(),
+            flareprox: crate::flareprox::FlareProxConfig::default(),
             engines,
         }
     }

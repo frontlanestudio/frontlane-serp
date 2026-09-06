@@ -55,6 +55,9 @@ pub enum Commands {
 
     /// Run as a Model Context Protocol (MCP) server over stdio
     Mcp,
+
+    /// Manage Cloudflare Workers HTTP proxy endpoints for IP rotation (FlareProx)
+    Flareprox(FlareproxArgs),
 }
 
 #[derive(Args, Debug)]
@@ -257,4 +260,62 @@ pub struct CrawlArgs {
     /// Output format: json, text
     #[arg(short, long, value_enum, default_value = "text")]
     pub format: CliFormat,
+}
+
+#[derive(Args, Debug)]
+pub struct FlareproxArgs {
+    /// Cloudflare API Token (falls back to CLOUDFLARE_API_TOKEN or config.yaml)
+    #[arg(long, global = true)]
+    pub token: Option<String>,
+
+    /// Cloudflare Account ID (falls back to CLOUDFLARE_ACCOUNT_ID or config.yaml)
+    #[arg(long, global = true)]
+    pub account: Option<String>,
+
+    /// Custom worker prefix (default: "flareprox")
+    #[arg(long, global = true)]
+    pub prefix: Option<String>,
+
+    #[command(subcommand)]
+    pub action: FlareproxAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FlareproxAction {
+    /// Deploy new FlareProx worker proxy endpoints
+    Create {
+        /// Number of worker proxies to create
+        #[arg(short, long, default_value = "1")]
+        count: usize,
+
+        /// Custom name for the worker (only used if count == 1)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// List deployed FlareProx worker endpoints
+    List,
+
+    /// Test deployed endpoints and display observed egress IPs
+    Test {
+        /// Target URL to test against (must return IP or test response)
+        #[arg(short, long, default_value = "https://ifconfig.me/ip")]
+        target: String,
+    },
+
+    /// Delete specific FlareProx worker endpoints by name
+    Delete {
+        /// Names of workers to delete
+        names: Vec<String>,
+    },
+
+    /// Bulk delete all FlareProx workers from the Cloudflare account
+    Cleanup,
+
+    /// Sync active deployed workers into config.yaml proxy pool
+    Sync {
+        /// Target config file path
+        #[arg(short, long, default_value = "config.yaml")]
+        config: String,
+    },
 }

@@ -122,7 +122,14 @@ impl Extractor {
         // 2. Fetch raw page
         let (status, body) = match self
             .http_client
-            .fetch_raw_response(url, None, initial_ua, initial_cookie.as_deref(), None)
+            .fetch_raw_response_with_proxy(
+                url,
+                proxy_url,
+                None,
+                initial_ua,
+                initial_cookie.as_deref(),
+                None,
+            )
             .await
         {
             Ok(res) => res,
@@ -157,8 +164,9 @@ impl Extractor {
                             let cookie_header = format!("cf_clearance={}", clearance.cf_clearance);
                             match self
                                 .http_client
-                                .fetch_raw_response(
+                                .fetch_raw_response_with_proxy(
                                     url,
+                                    proxy_url,
                                     None,
                                     Some(&clearance.user_agent),
                                     Some(&cookie_header),

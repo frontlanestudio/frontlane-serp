@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, RankArgs, SearchArgs,
-    SuggestArgs,
+    BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, FlareproxAction,
+    FlareproxArgs, RankArgs, SearchArgs, SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -116,6 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Mcp) => {
             handle_mcp(&engines, &http_client).await?;
+        }
+        Some(Commands::Flareprox(flare_args)) => {
+            handle_flareprox(&flare_args, &config).await?;
         }
         None => {
             // Default action: start server
@@ -673,6 +676,207 @@ async fn handle_batch_rank(
 
     if args.format == CliFormat::Json {
         println!("{}", serde_json::to_string_pretty(&results)?);
+    }
+
+    Ok(())
+}
+
+async fn handle_flareprox(
+    args: &FlareproxArgs,
+    config: &AppConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let token = args
+        .token
+        .clone()
+        .or_else(|| config.flareprox.api_token.clone())
+        .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
+        .or_else(|| std::env::var("CF_API_TOKEN").ok())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            "Cloudflare API Token required. Pass --token, set in config.yaml under flareprox.api_token, or export CLOUDFLARE_API_TOKEN."
+        })?;
+
+    let account = args
+        .account
+        .clone()
+        .or_else(|| config.flareprox.account_id.clone())
+        .or_else(|| std::env::var("CLOUDFLARE_ACCOUNT_ID").ok())
+        .or_else(|| std::env::var("CF_ACCOUNT_ID").ok())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            "Cloudflare Account ID required. Pass --account, set in config.yaml under flareprox.account_id, or export CLOUDFLARE_ACCOUNT_ID."
+        })?;
+
+    let prefix = args
+        .prefix
+        .clone()
+        .unwrap_or_else(|| config.flareprox.worker_prefix.clone());
+
+    let client = frontlane_serp::flareprox::CloudflareClient::new(token, account, Some(prefix))?;
+
+    match &args.action {
+        FlareproxAction::Create { count, name } => {
+            let n = (*count).max(1);
+            println!("🔥 Deploying {} FlareProx worker proxy endpoint(s)...", n);
+
+            let mut deployed = Vec::new();
+            for i in 0..n {
+                let worker_name = if n == 1 { name.as_deref() } else { None };
+                print!("  [{}/{}] Deploying worker... ", i + 1, n);
+                match client.create_worker(worker_name).await {
+                    Ok(dep) => {
+                        println!("✅ {}", dep.url);
+                        deployed.push(dep);
+                    }
+                    Err(e) => {
+                        println!("❌ Error: {}", e);
+                    }
+                }
+            }
+
+            println!("\n✨ Deployed {} endpoint(s).", deployed.len());
+            if !deployed.is_empty() {
+                println!("\nTest your worker proxy directly:");
+                println!(
+                    "  curl -H 'X-Target-URL: https://ifconfig.me/ip' {}",
+                    deployed[0].url
+                );
+                println!(
+                    "  curl '{}/?url=https://ifconfig.me/ip'",
+                    deployed[0].url
+                );
+                println!("\nUse in Frontlane SERP queries:");
+                println!(
+                    "  frontlane-serp search google \"query\" --proxy {}",
+                    deployed[0].url
+                );
+            }
+        }
+        FlareproxAction::List => {
+            println!("🔍 Fetching deployed FlareProx workers from Cloudflare...");
+            let workers = client.list_workers().await?;
+            if workers.is_empty() {
+                println!(
+                    "  No deployed FlareProx workers found matching prefix '{}'.",
+                    client.worker_prefix()
+                );
+                println!("  Run 'frontlane-serp flareprox create' to deploy one.");
+            } else {
+                println!("\n  Active FlareProx Worker Endpoints ({})", workers.len());
+                println!("  {:<35} {:<55} {:<24}", "NAME", "URL", "CREATED AT");
+                println!("  {}", "-".repeat(115));
+                for w in &workers {
+                    println!("  {:<35} {:<55} {:<24}", w.name, w.url, w.created_at);
+                }
+            }
+        }
+        FlareproxAction::Test { target } => {
+            println!("🔍 Testing FlareProx endpoints against: {}", target);
+            let workers = client.list_workers().await?;
+            if workers.is_empty() {
+                println!("  No active FlareProx workers found to test.");
+                return Ok(());
+            }
+
+            println!(
+                "  Found {} worker(s). Testing connectivity and egress IPs...\n",
+                workers.len()
+            );
+            println!(
+                "  {:<35} {:<8} {:<10} {:<18} {:<10}",
+                "NAME", "STATUS", "LATENCY", "EGRESS IP", "RESULT"
+            );
+            println!("  {}", "-".repeat(90));
+
+            for w in workers {
+                let res = client.test_endpoint(&w, target).await;
+                let status_str = if res.status > 0 {
+                    res.status.to_string()
+                } else {
+                    "ERR".to_string()
+                };
+                let lat_str = format!("{}ms", res.latency_ms);
+                let ip_str = res.egress_ip.as_deref().unwrap_or("-");
+                let result_str = if res.success {
+                    "✅ OK"
+                } else {
+                    "❌ FAILED"
+                };
+
+                println!(
+                    "  {:<35} {:<8} {:<10} {:<18} {:<10}",
+                    res.name, status_str, lat_str, ip_str, result_str
+                );
+            }
+        }
+        FlareproxAction::Delete { names } => {
+            if names.is_empty() {
+                println!("Please specify at least one worker name to delete.");
+                return Ok(());
+            }
+            for name in names {
+                print!("Deleting worker '{}'... ", name);
+                match client.delete_worker(name).await {
+                    Ok(true) => println!("✅ Deleted"),
+                    Ok(false) => println!("⚠️ Not found"),
+                    Err(e) => println!("❌ Error: {}", e),
+                }
+            }
+        }
+        FlareproxAction::Cleanup => {
+            println!(
+                "🧹 Cleaning up all FlareProx workers matching prefix '{}'...",
+                client.worker_prefix()
+            );
+            let count = client.cleanup_all().await?;
+            println!("✅ Successfully deleted {} FlareProx worker(s).", count);
+        }
+        FlareproxAction::Sync {
+            config: config_path,
+        } => {
+            println!(
+                "🔄 Syncing active FlareProx workers into '{}'...",
+                config_path
+            );
+            let workers = client.list_workers().await?;
+            if workers.is_empty() {
+                println!("  No active FlareProx workers found on Cloudflare account.");
+                return Ok(());
+            }
+
+            let mut updated_config = AppConfig::load(config_path).unwrap_or_default();
+            updated_config.flareprox.workers = workers.iter().map(|w| w.url.clone()).collect();
+            updated_config.flareprox.enabled = true;
+
+            for w in &workers {
+                let already_exists = updated_config
+                    .proxies
+                    .entries
+                    .iter()
+                    .any(|e| e.url == w.url);
+                if !already_exists {
+                    updated_config
+                        .proxies
+                        .entries
+                        .push(frontlane_serp::config::ProxyEntry {
+                            url: w.url.clone(),
+                            tags: vec![
+                                "flareprox".to_string(),
+                                "cf".to_string(),
+                                "rotating".to_string(),
+                            ],
+                        });
+                }
+            }
+
+            let serialized = serde_yaml::to_string(&updated_config)?;
+            tokio::fs::write(config_path, serialized).await?;
+            println!(
+                "✅ Synced {} worker(s) to '{}' under proxy pool.",
+                workers.len(),
+                config_path
+            );
+        }
     }
 
     Ok(())
