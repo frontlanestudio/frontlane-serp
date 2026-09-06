@@ -1,118 +1,115 @@
 server:
-  host: 0.0.0.0 # API host to bind
-  port: 7000 # API port to bind
-  debug: false # Enable debug logs
-  verbose: false # Enable debug-level request logs
-  raw_requests: true # Direct async HTTP mode
-  insecure: true # Allow insecure TLS connections
-
+  host: 0.0.0.0
+  port: 7000
+  debug: false
+  verbose: false
+  raw_requests: true
+  insecure: true
 app:
-  log_format: "text" # json|text
-  timeout: 15 # Search timeout in seconds, per attempt; the request deadline is derived from this x retries
-  mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
-
+  log_format: text
+  timeout: 15
+  browser_path: ''
+  profiles: ''
+  head: false
+  leakless: false
+  leave_head: false
+  block_resources: image,font,css,media
+  block_trackers: true
+  max_processes: 6
+  idle_ttl: 5m
+  mega_timeout: 90s
 extract:
   enabled: true
-  default_mode: auto # auto|fast|rendered
+  default_mode: auto
   timeout: 20s
   max_bytes: 2000000
   max_concurrent: 2
-
 proxies:
   allow_request_proxy_url: true
-  # Force a single proxy for all engines.
-  # Same behavior as passing --proxy on the CLI.
-  #global: http://127.0.0.1:8080
-
-  # Advanced mode: define tagged proxy pools and opt engines in with `proxy: <tag>`.
-  #entries:
-  #  - url: http://127.0.0.1:8080
-  #    tags: [default, us]
-  #  - url: socks5h://127.0.0.1:1080
-  #    tags: [eu]
+  global: null
+  entries:
+  - url: https://flareprox-1788669654-httttt.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
   health:
-    failure_threshold: 2 # Disable proxy after this many consecutive failures
+    failure_threshold: 2
   lanes:
-    enabled: true # Reuse browser profile/cookies per engine + proxy session ID
-    max_lanes: 100 # LRU cap for sticky lanes kept in worker memory
-    drop_cookies_on_challenge: true # Clear lane cookies on captcha/challenge only
-
+    enabled: true
+    max_lanes: 100
+    drop_cookies_on_challenge: true
 cache:
-  ttl_seconds: 120 # Dedicated endpoint cache TTL in seconds (0 disables cache)
-  max_size: 1000 # Maximum cached dedicated responses before oldest-entry eviction
-
-# FlareProx - Cloudflare Workers proxy automation (100k free requests/day)
-# Deploy rotating proxies with: `frontlane-serp flareprox create --count 3`
-# Then sync into config with:   `frontlane-serp flareprox sync`
-flareprox:
-  enabled: false
-  # api_token: "your_cloudflare_api_token" # or export CLOUDFLARE_API_TOKEN
-  # account_id: "your_cloudflare_account_id" # or export CLOUDFLARE_ACCOUNT_ID
-  worker_prefix: "flareprox"
-  workers: []
-
+  ttl_seconds: 120
+  max_size: 1000
 resilience:
-  max_retries: 1 # Retry attempts per engine request (0 disables retries)
-  allow_endpoint_fallback: false # Keep dedicated endpoints engine-pure by default
-
-# circuit_breaker:
-#   failures: 5 # Consecutive failures required to open circuit
-#   recovery_seconds: 60 # Wait time before moving open circuit to half-open
-#   successes: 2 # Consecutive half-open successes required to close circuit
-
+  max_retries: 1
+  allow_endpoint_fallback: false
+circuit_breaker: null
 cors:
   enabled: true
-  allow_origins: "*"
-  allow_methods: "GET, POST, OPTIONS"
-  allow_headers: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant, X-Use-Profile"
+  allow_origins: '*'
+  allow_methods: GET, POST, OPTIONS
+  allow_headers: Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant, X-Use-Profile
   max_age: 86400
-
-# 2captcha:
-#   apikey: "123123123123123"
-
 captcha:
-  solver_enabled: false # Global captcha solver gate (requires 2captcha.apikey)
-
-google:
-  rate_requests: 60 # Allowed average requests per minute
-  rate_burst: 3 # Burst requests before limiter applies
-  #captcha: true # Engine-level solver flag (also requires captcha.solver_enabled=true)
-
+  solver_enabled: false
+  provider: capsolver
+  apikey: null
+flareprox:
+  enabled: true
+  api_token: null
+  account_id: null
+  worker_prefix: flareprox
+  workers:
+  - https://flareprox-1788669654-httttt.frontlane-studio.workers.dev
 yandex:
   rate_requests: 60
   rate_burst: 3
-
+  proxy: null
+  captcha: null
 baidu:
   rate_requests: 60
   rate_burst: 3
-  # No proxy tag means direct traffic
-
+  proxy: null
+  captcha: null
 bing:
   rate_requests: 60
   rate_burst: 3
-  # No proxy tag means direct traffic
-
-duckduckgo:
-  rate_requests: 60
-  rate_burst: 3
-
+  proxy: null
+  captcha: null
 ecosia:
   rate_requests: 60
   rate_burst: 3
-  # No proxy tag means direct traffic
-
-hackernews:
-  rate_requests: 120
-  rate_burst: 10
-
-github:
-  rate_requests: 60
-  rate_burst: 5
-
+  proxy: null
+  captcha: null
 crates:
   rate_requests: 60
   rate_burst: 5
-
+  proxy: null
+  captcha: null
+github:
+  rate_requests: 60
+  rate_burst: 5
+  proxy: null
+  captcha: null
+duckduckgo:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
+hackernews:
+  rate_requests: 120
+  rate_burst: 10
+  proxy: null
+  captcha: null
+google:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
 wikipedia:
   rate_requests: 120
   rate_burst: 10
+  proxy: null
+  captcha: null
