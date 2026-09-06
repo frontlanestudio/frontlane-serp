@@ -48,12 +48,35 @@ pub fn parse_page_audit(
     // Headings
     let h1: Vec<String> = doc
         .select(&Selector::parse("h1").unwrap())
-        .map(|el| el.text().collect::<Vec<_>>().join(" ").trim().to_string())
+        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|s| !s.is_empty())
         .collect();
     let h1_exact_match = h1.iter().any(|h| h.to_lowercase().contains(&norm_kw));
 
-    let h2_count = doc.select(&Selector::parse("h2").unwrap()).count();
+    let h2_headings: Vec<String> = doc
+        .select(&Selector::parse("h2").unwrap())
+        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty() && s.len() > 3)
+        .collect();
+    let h2_count = h2_headings.len();
+
+    let h3_headings: Vec<String> = doc
+        .select(&Selector::parse("h3").unwrap())
+        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty() && s.len() > 3)
+        .collect();
+
+    // Questions extracted from H2 & H3
+    let mut questions_found = Vec::new();
+    let question_starters = ["what", "how", "why", "can", "when", "where", "who", "do", "does", "is", "are", "which", "should"];
+    for heading in h2_headings.iter().chain(h3_headings.iter()) {
+        let hl = heading.to_lowercase();
+        if (heading.ends_with('?') || question_starters.iter().any(|&q| hl.starts_with(q)))
+            && !questions_found.contains(heading)
+        {
+            questions_found.push(heading.clone());
+        }
+    }
 
     // Body content (excluding chrome elements)
     let body_text = doc
@@ -106,18 +129,58 @@ pub fn parse_page_audit(
     // Slug analysis
     let url_lower = page_url.to_lowercase();
     let slug_has_exact_kw = url_lower.contains(&kw_slug);
-    let geo_terms = ["los-angeles", "los_angeles", "california", "la-"];
+    let geo_terms = ["los-angeles", "los_angeles", "california", "la-", "sandiego", "san-diego", "orange-county", "san-francisco"];
     let slug_has_geo = geo_terms.iter().any(|&g| url_lower.contains(g));
     let path = Url::parse(page_url).map(|u| u.path().to_string()).unwrap_or_default();
     let is_dedicated_page = path.len() > 1 && path != "/" && (slug_has_geo || slug_has_exact_kw);
 
-    // Schema analysis
+    // Directory / Aggregator detection
+    let known_directories = [
+        "justia.com", "avvo.com", "findlaw.com", "lawyers.com", "yelp.com",
+        "superlawyers.com", "expertise.com", "nolo.com", "forbes.com", "martindale.com",
+        "legal500.com", "bestlawyers.com", "lawyersinca.com"
+    ];
+    let is_directory_aggregator = known_directories.iter().any(|&d| domain.contains(d));
+
+    // Canonical link & Robots meta
+    let canonical_url = doc
+        .select(&Selector::parse("link[rel='canonical']").unwrap())
+        .next()
+        .and_then(|el| el.value().attr("href"))
+        .map(|s| s.trim().to_string());
+    let is_self_canonical = if let Some(ref c) = canonical_url {
+        c.trim_end_matches('/') == page_url.trim_end_matches('/')
+    } else {
+        false
+    };
+
+    let robots_meta = doc
+        .select(&Selector::parse("meta[name='robots'], meta[name='Robots']").unwrap())
+        .next()
+        .and_then(|el| el.value().attr("content"))
+        .unwrap_or("")
+        .to_lowercase();
+    let is_noindex = robots_meta.contains("noindex");
+
+    // Conversion signals: tel: links and forms
+    let tel_links_count = doc
+        .select(&Selector::parse("a[href^='tel:']").unwrap())
+        .count();
+    let form_count = doc
+        .select(&Selector::parse("form").unwrap())
+        .count();
+
+    // Schema analysis & Ratings/Reviews
     let mut schema_types = Vec::new();
+    let mut rating_value: Option<f64> = None;
+    let mut review_count: Option<u64> = None;
+
     let json_ld_sel = Selector::parse("script[type='application/ld+json']").unwrap();
     for script in doc.select(&json_ld_sel) {
         let content = script.text().collect::<Vec<_>>().join("");
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
             extract_schema_types(&val, &mut schema_types);
+            extract_ratings_and_reviews(&val, &mut rating_value, &mut review_count);
         }
     }
     schema_types.sort();
@@ -129,7 +192,8 @@ pub fn parse_page_audit(
     });
     let has_review_rating_schema = st_lower.iter().any(|s| {
         s.contains("aggregaterating") || s.contains("review")
-    });
+    }) || rating_value.is_some() || review_count.is_some();
+    let has_faq_schema = st_lower.iter().any(|s| s.contains("faqpage") || s.contains("question"));
 
     PageAuditResult {
         rank_label,
@@ -148,15 +212,27 @@ pub fn parse_page_audit(
         h1,
         h1_exact_match,
         h2_count,
+        h2_headings,
+        h3_headings,
+        questions_found,
         word_count,
         exact_keyword_count,
         keyword_density_pct,
         slug_has_exact_kw,
         slug_has_geo,
         is_dedicated_page,
+        is_directory_aggregator,
+        canonical_url,
+        is_self_canonical,
+        is_noindex,
+        tel_links_count,
+        form_count,
         schema_types,
         has_local_business_schema,
         has_review_rating_schema,
+        has_faq_schema,
+        review_count,
+        rating_value,
         error: None,
     }
 }
@@ -189,6 +265,52 @@ fn extract_schema_types(val: &serde_json::Value, out: &mut Vec<String>) {
         serde_json::Value::Array(arr) => {
             for item in arr {
                 extract_schema_types(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_ratings_and_reviews(val: &serde_json::Value, rating: &mut Option<f64>, reviews: &mut Option<u64>) {
+    match val {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Object(ar)) = map.get("aggregateRating") {
+                if rating.is_none() {
+                    if let Some(r) = ar.get("ratingValue") {
+                        if let Some(num) = r.as_f64() {
+                            *rating = Some(num);
+                        } else if let Some(s) = r.as_str() {
+                            if let Ok(num) = s.parse::<f64>() {
+                                *rating = Some(num);
+                            }
+                        }
+                    }
+                }
+                if reviews.is_none() {
+                    if let Some(c) = ar.get("reviewCount").or_else(|| ar.get("ratingCount")) {
+                        if let Some(num) = c.as_u64() {
+                            *reviews = Some(num);
+                        } else if let Some(s) = c.as_str() {
+                            if let Ok(num) = s.parse::<u64>() {
+                                *reviews = Some(num);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(graph) = map.get("@graph") {
+                extract_ratings_and_reviews(graph, rating, reviews);
+            }
+            for (_k, v) in map {
+                if v.is_object() || v.is_array() {
+                    extract_ratings_and_reviews(v, rating, reviews);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                extract_ratings_and_reviews(item, rating, reviews);
             }
         }
         _ => {}

@@ -90,8 +90,16 @@ pub async fn run_audit(
 
     competitor_audits.sort_by_key(|c| c.rank_num.unwrap_or(999));
 
-    let (benchmarks, insights) =
-        analyze_gaps(keyword, Some(&target_audit), &competitor_audits);
+    let has_local_pack = rank_resp.serp_features.iter().any(|f| matches!(f.feature_type, crate::core::types::ResultType::Local));
+    let has_paa = rank_resp.serp_features.iter().any(|f| matches!(f.feature_type, crate::core::types::ResultType::PeopleAlsoAsk | crate::core::types::ResultType::RelatedQuestions));
+
+    let gap_out = analyze_gaps(
+        keyword,
+        Some(&target_audit),
+        &competitor_audits,
+        has_local_pack,
+        has_paa,
+    );
 
     Ok(KeywordAuditReport {
         keyword: keyword.to_string(),
@@ -101,8 +109,11 @@ pub async fn run_audit(
         target_rank: rank_resp.rank,
         target_audit: Some(target_audit),
         competitor_audits,
-        benchmarks,
-        insights,
+        benchmarks: gap_out.benchmarks,
+        insights: gap_out.insights,
+        opportunity_score: gap_out.opportunity_score,
+        quick_wins: gap_out.quick_wins,
+        missing_content_outline: gap_out.missing_content_outline,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -150,15 +161,27 @@ async fn audit_single_url(
                 h1: Vec::new(),
                 h1_exact_match: false,
                 h2_count: 0,
+                h2_headings: Vec::new(),
+                h3_headings: Vec::new(),
+                questions_found: Vec::new(),
                 word_count: 0,
                 exact_keyword_count: 0,
                 keyword_density_pct: 0.0,
                 slug_has_exact_kw: false,
                 slug_has_geo: false,
                 is_dedicated_page: false,
+                is_directory_aggregator: false,
+                canonical_url: None,
+                is_self_canonical: false,
+                is_noindex: false,
+                tel_links_count: 0,
+                form_count: 0,
                 schema_types: Vec::new(),
                 has_local_business_schema: false,
                 has_review_rating_schema: false,
+                has_faq_schema: false,
+                review_count: None,
+                rating_value: None,
                 error: Some(format!("{}", e)),
             }
         }
