@@ -285,11 +285,11 @@ pub enum FlareproxAction {
     /// Deploy new FlareProx worker proxy endpoints
     Create {
         /// Number of worker proxies to create
-        #[arg(short, long, default_value = "1")]
+        #[arg(short = 'n', long, default_value = "1")]
         count: usize,
 
         /// Custom name for the worker (only used if count == 1)
-        #[arg(short, long)]
+        #[arg(long)]
         name: Option<String>,
     },
 
@@ -299,7 +299,7 @@ pub enum FlareproxAction {
     /// Test deployed endpoints and display observed egress IPs
     Test {
         /// Target URL to test against (must return IP or test response)
-        #[arg(short, long, default_value = "https://ifconfig.me/ip")]
+        #[arg(short = 't', long, default_value = "https://ifconfig.me/ip")]
         target: String,
     },
 
@@ -315,7 +315,7 @@ pub enum FlareproxAction {
     /// Sync active deployed workers into config.yaml proxy pool
     Sync {
         /// Target config file path
-        #[arg(short, long, default_value = "config.yaml")]
+        #[arg(long, default_value = "config.yaml")]
         config: String,
     },
 }

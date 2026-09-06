@@ -419,7 +419,7 @@ impl CloudflareClient {
                     None
                 };
 
-                let success = status >= 200 && status < 400;
+                let success = (200..400).contains(&status);
 
                 FlareProxTestResult {
                     name: worker.name.clone(),

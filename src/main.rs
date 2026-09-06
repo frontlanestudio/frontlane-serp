@@ -692,9 +692,9 @@ async fn handle_flareprox(
         .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
         .or_else(|| std::env::var("CF_API_TOKEN").ok())
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            "Cloudflare API Token required. Pass --token, set in config.yaml under flareprox.api_token, or export CLOUDFLARE_API_TOKEN."
-        })?;
+        .ok_or(
+            "Cloudflare API Token required. Pass --token, set in config.yaml under flareprox.api_token, or export CLOUDFLARE_API_TOKEN.",
+        )?;
 
     let account = args
         .account
@@ -703,9 +703,9 @@ async fn handle_flareprox(
         .or_else(|| std::env::var("CLOUDFLARE_ACCOUNT_ID").ok())
         .or_else(|| std::env::var("CF_ACCOUNT_ID").ok())
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            "Cloudflare Account ID required. Pass --account, set in config.yaml under flareprox.account_id, or export CLOUDFLARE_ACCOUNT_ID."
-        })?;
+        .ok_or(
+            "Cloudflare Account ID required. Pass --account, set in config.yaml under flareprox.account_id, or export CLOUDFLARE_ACCOUNT_ID.",
+        )?;
 
     let prefix = args
         .prefix

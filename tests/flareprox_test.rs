@@ -64,13 +64,13 @@ fn test_flareprox_config_credentials_resolution() {
     config.account_id = Some("mock_account".to_string());
     let client = config.to_client().unwrap();
     assert_eq!(client.worker_prefix(), "flareprox");
-    assert_eq!(client.generate_worker_name().starts_with("flareprox-"), true);
+    assert!(client.generate_worker_name().starts_with("flareprox-"));
 }
 
 #[test]
 fn test_app_config_includes_flareprox() {
     let cfg = AppConfig::default();
-    assert_eq!(cfg.flareprox.enabled, false);
+    assert!(!cfg.flareprox.enabled);
     assert_eq!(cfg.flareprox.worker_prefix, "flareprox");
     assert!(cfg.flareprox.workers.is_empty());
 }

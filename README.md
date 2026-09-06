@@ -380,6 +380,39 @@ Advanced tagged proxy pools and per-request overrides are available in [`config.
 - `X-Use-Proxy: <tag>`
 - `X-Use-Proxy: direct`
 
+### FlareProx: Free Rotating Proxies via Cloudflare Workers
+
+Frontlane SERP includes a native, pure-Rust implementation of [FlareProx](https://github.com/MrTurvey/flareprox), allowing you to automate the deployment of HTTP proxy endpoints on Cloudflare Workers. This grants you free IP rotation across Cloudflare's global edge network (up to 100,000 requests/day free).
+
+```bash
+# 1. Export Cloudflare credentials (or configure in config.yaml)
+export CLOUDFLARE_API_TOKEN="your_api_token"
+export CLOUDFLARE_ACCOUNT_ID="your_account_id"
+
+# 2. Deploy 3 worker proxy endpoints
+frontlane-serp flareprox create --count 3
+
+# 3. List deployed endpoints
+frontlane-serp flareprox list
+
+# 4. Test connectivity and view observed egress IPs
+frontlane-serp flareprox test
+
+# 5. Sync active workers directly into config.yaml proxy pool
+frontlane-serp flareprox sync
+
+# 6. Delete specific workers or bulk cleanup
+frontlane-serp flareprox delete flareprox-123456-abcdef
+frontlane-serp flareprox cleanup
+```
+
+Once deployed, you can use any FlareProx worker endpoint directly with `--proxy` or through the proxy pool:
+
+```bash
+# Use FlareProx worker as proxy for search queries
+frontlane-serp search google "rust async web" --proxy https://flareprox-worker.account.workers.dev
+```
+
 ---
 
 ## API Documentation
