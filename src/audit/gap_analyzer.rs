@@ -157,17 +157,17 @@ pub fn analyze_gaps(
                 category: "SERP Search Intent".to_string(),
                 severity: "High".to_string(),
                 observation: format!(
-                    "{:.0}% of top organic positions are occupied by lawyer directories & aggregators (Justia, Avvo, FindLaw, Yelp).",
+                    "{:.0}% of top organic positions are occupied by industry directories & aggregators.",
                     directory_aggregator_pct
                 ),
-                actionable_recommendation: "Query intent is heavily directory-driven. Maintain a dual strategy: optimize Google Business Profile, Justia, and Avvo listings to capture directory traffic while building deep localized content for organic capture.".to_string(),
+                actionable_recommendation: "Query intent is heavily directory-driven. Maintain a dual strategy: claim and optimize external directory & portal listings to capture aggregator traffic while building deep localized content for organic search capture.".to_string(),
             });
         }
 
         // 2. Title Tag Gap
         if !target.title_exact_match {
             score -= 20;
-            quick_wins.push(format!("Front-load exact keyword in <title>: '<title>{} | [Firm Name]</title>'", keyword));
+            quick_wins.push(format!("Place target keyword at beginning of <title>: '<title>{} | [Site Name]</title>'", keyword));
             insights.push(GapInsight {
                 category: "Title Tag Alignment".to_string(),
                 severity: "High".to_string(),
@@ -176,7 +176,7 @@ pub fn analyze_gaps(
                     target.title, keyword, exact_title_match_pct
                 ),
                 actionable_recommendation: format!(
-                    "Front-load the exact keyword in your <title> tag: '<title>{} | [Brand / Value Proposition]</title>'.",
+                    "Place the exact keyword at the start of your <title> tag: '<title>{} | [Site Name / Brand]</title>'.",
                     keyword
                 ),
             });
@@ -250,15 +250,18 @@ pub fn analyze_gaps(
         // 6. URL Architecture & Geo-Intent
         if !target.is_dedicated_page && dedicated_slug_pct >= 50.0 {
             score -= 15;
-            quick_wins.push("Deploy a dedicated localized landing page (e.g. /los-angeles-personal-injury-lawyer)".to_string());
+            quick_wins.push(format!("Deploy a dedicated landing page for this query (e.g. '/{}/')", keyword.trim().replace(' ', "-")));
             insights.push(GapInsight {
                 category: "URL Architecture".to_string(),
                 severity: "High".to_string(),
                 observation: format!(
-                    "{:.0}% of top ranking competitors rank with dedicated localized landing pages rather than a generic root homepage.",
+                    "{:.0}% of top ranking competitors rank with dedicated localized or topic landing pages rather than a generic root homepage.",
                     dedicated_slug_pct
                 ),
-                actionable_recommendation: "Target this query with a dedicated localized landing page (e.g. '/los-angeles-personal-injury-lawyer' or '/areas-we-serve/los-angeles-personal-injury-lawyer/') rather than the root domain homepage, and point prominent internal links to it.".to_string(),
+                actionable_recommendation: format!(
+                    "Target this query with a dedicated topic or location landing page (e.g. '/{}/') rather than the root domain homepage, and point prominent internal links to it.",
+                    keyword.trim().replace(' ', "-")
+                ),
             });
         }
 
@@ -280,15 +283,15 @@ pub fn analyze_gaps(
         // 8. Structured Local Data & Reviews
         if !target.has_local_business_schema && schema_adoption_pct >= 40.0 {
             score -= 5;
-            quick_wins.push("Add JSON-LD LegalService / Attorney schema with address and geo-coordinates.".to_string());
+            quick_wins.push("Add JSON-LD LocalBusiness / Organization schema with address and geo-coordinates.".to_string());
             insights.push(GapInsight {
                 category: "Structured Data".to_string(),
                 severity: "Medium".to_string(),
                 observation: format!(
-                    "Target is missing LocalBusiness / LegalService / Attorney JSON-LD schema markup. {:.0}% of competitors implement rich schema.",
+                    "Target is missing LocalBusiness / Organization JSON-LD schema markup. {:.0}% of competitors implement rich schema.",
                     schema_adoption_pct
                 ),
-                actionable_recommendation: "Implement JSON-LD LegalService/Attorney schema specifying addressLocality, geo coordinates (latitude/longitude), openingHours, and areaServed.".to_string(),
+                actionable_recommendation: "Implement JSON-LD LocalBusiness or Organization schema specifying name, address, geo coordinates (latitude/longitude), and areaServed.".to_string(),
             });
         }
 

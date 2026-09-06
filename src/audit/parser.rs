@@ -126,19 +126,22 @@ pub fn parse_page_audit(
         0.0
     };
 
-    // Slug analysis
+    // Slug / Dedicated Page analysis
     let url_lower = page_url.to_lowercase();
     let slug_has_exact_kw = url_lower.contains(&kw_slug);
-    let geo_terms = ["los-angeles", "los_angeles", "california", "la-", "sandiego", "san-diego", "orange-county", "san-francisco"];
-    let slug_has_geo = geo_terms.iter().any(|&g| url_lower.contains(g));
+    // Dynamic query word presence in URL path
+    let kw_words: Vec<&str> = norm_kw.split_whitespace().filter(|w| w.len() >= 3).collect();
     let path = Url::parse(page_url).map(|u| u.path().to_string()).unwrap_or_default();
-    let is_dedicated_page = path.len() > 1 && path != "/" && (slug_has_geo || slug_has_exact_kw);
+    let path_lower = path.to_lowercase();
+    let slug_has_kw_terms = !kw_words.is_empty() && kw_words.iter().filter(|&&w| path_lower.contains(w)).count() >= (kw_words.len() / 2).max(1);
+    let is_dedicated_page = path.len() > 1 && path != "/" && (slug_has_exact_kw || slug_has_kw_terms);
+    let slug_has_geo = slug_has_kw_terms;
 
     // Directory / Aggregator detection
     let known_directories = [
-        "justia.com", "avvo.com", "findlaw.com", "lawyers.com", "yelp.com",
-        "superlawyers.com", "expertise.com", "nolo.com", "forbes.com", "martindale.com",
-        "legal500.com", "bestlawyers.com", "lawyersinca.com"
+        "yelp.com", "yellowpages.com", "bbb.org", "wikipedia.org", "forbes.com",
+        "expertise.com", "angis.com", "thumbtack.com", "tripadvisor.com", "manta.com",
+        "justia.com", "avvo.com", "findlaw.com", "lawyers.com", "superlawyers.com", "nolo.com"
     ];
     let is_directory_aggregator = known_directories.iter().any(|&d| domain.contains(d));
 

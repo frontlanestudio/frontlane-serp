@@ -65,7 +65,7 @@ pub enum Commands {
 
 #[derive(Args, Debug)]
 pub struct BatchRankArgs {
-    /// Target domain or URL (e.g. calljacob.com)
+    /// Target domain or URL (e.g. example.com)
     #[arg(short, long)]
     pub target: String,
 
@@ -116,7 +116,7 @@ pub struct BatchRankArgs {
 
 #[derive(Args, Debug)]
 pub struct AuditArgs {
-    /// Target domain (e.g. calljacob.com)
+    /// Target domain (e.g. example.com)
     pub target: String,
 
     /// Target keyword to audit against top ranking competitors

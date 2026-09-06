@@ -83,7 +83,7 @@ impl KeywordAuditReport {
                 _ => "—".to_string(),
             };
             out.push_str(&format!(
-                "| **Target** | **`{}`** | Firm | {} | {} | **{}** | **{}** | {} | {} |\n",
+                "| **Target** | **`{}`** | Site | {} | {} | **{}** | **{}** | {} | {} |\n",
                 t.domain,
                 truncate(&t.title, 35),
                 truncate(h1_str, 30),
@@ -96,7 +96,7 @@ impl KeywordAuditReport {
 
         for comp in &self.competitor_audits {
             let h1_str = comp.h1.first().map(|s| s.as_str()).unwrap_or("—");
-            let type_str = if comp.is_directory_aggregator { "Directory" } else { "Firm" };
+            let type_str = if comp.is_directory_aggregator { "Directory" } else { "Site" };
             let schema_tag = if comp.has_local_business_schema && comp.has_faq_schema {
                 "Local+FAQ"
             } else if comp.has_local_business_schema {
@@ -192,7 +192,7 @@ impl KeywordAuditReport {
             out.push_str(&format!("{:<8} | {:<22} | {:<10} | {:<30} | {:<6} | {:<8} | {}\n",
                 "[TARGET]",
                 truncate(&t.domain, 22),
-                "Firm",
+                "Site",
                 truncate(&t.title, 30),
                 t.word_count,
                 t.exact_keyword_count,
@@ -204,7 +204,7 @@ impl KeywordAuditReport {
             out.push_str(&format!("{:<8} | {:<22} | {:<10} | {:<30} | {:<6} | {:<8} | {}\n",
                 format!("#{}", comp.rank_num.unwrap_or(0)),
                 truncate(&comp.domain, 22),
-                if comp.is_directory_aggregator { "Directory" } else { "Firm" },
+                if comp.is_directory_aggregator { "Directory" } else { "Site" },
                 truncate(&comp.title, 30),
                 comp.word_count,
                 comp.exact_keyword_count,
