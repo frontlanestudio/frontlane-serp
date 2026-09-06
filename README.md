@@ -58,8 +58,7 @@ docker compose up
 ### First request
 
 ```sh
-# mode=any returns the first engine that responds
-curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&extract=1&mode=any"
+curl "http://127.0.0.1:7000/mega/search?engines=bing,duckduckgo&text=rust+async&extract=1"
 ```
 
 <details>
@@ -163,233 +162,236 @@ curl "http://127.0.0.1:7000/mega/search?engines=bing,google&text=golang+vs+rust&
 
 </details>
 
-## SDKs & Examples
+## Endpoints & Capabilities
 
-Official client packages. Each works against your self-hosted server (set `baseUrl`) or the [hosted API](https://openserp.org/cloud) (set `apiKey`):
+### 1. Dedicated Search & Image Endpoints
 
-| Type                        | Package                                                                                      | Source                                                              | Install                         |
-| --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------- |
-| JavaScript / TypeScript SDK | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk)                               | [openserpapi/sdk-js](https://github.com/openserpapi/sdk-js)         | `npm install @openserp/sdk`     |
-| Python SDK                  | [`openserp`](https://pypi.org/project/openserp/)                                             | [openserpapi/sdk-python](https://github.com/openserpapi/sdk-python) | `pip install openserp`          |
-| MCP server (AI agents)      | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | [openserpapi/mcp](https://github.com/openserpapi/mcp)               | `npx @openserp/mcp`             |
-| n8n community node          | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | [openserpapi/n8n](https://github.com/openserpapi/n8n)               | Install via n8n community nodes |
-
-See [**examples**](./examples) for small JavaScript and Python use cases covering search, AI grounding, SEO, content extraction, and image search.
-
-```js
-import { OpenSERP } from "@openserp/sdk";
-
-// Use your self-hosted server
-const client = new OpenSERP({ baseUrl: "http://localhost:7000" });
-const { results } = await client.search({ engine: "google", text: "openserp", limit: 5 });
-```
-
-## Search Endpoints
-
-Available engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
-
-Dedicated engine endpoints:
+Directly query any of the 10 supported engines (`google`, `bing`, `duckduckgo`, `yandex`, `baidu`, `ecosia`, `hackernews`, `github`, `crates`, `wikipedia`):
 
 ```bash
-curl "http://127.0.0.1:7000/google/search?text=golang&limit=10"
+# Web search (Google)
+curl "http://127.0.0.1:7000/google/search?text=rust+axum&limit=10"
+
+# Developer engine: Crates.io
+curl "http://127.0.0.1:7000/crates/search?text=tokio&limit=5"
+
+# Developer engine: Hacker News
+curl "http://127.0.0.1:7000/hackernews/search?text=show+hn&limit=5"
+
+# Developer engine: GitHub
+curl "http://127.0.0.1:7000/github/search?text=rust+serp&limit=5"
+
+# Image search
+curl "http://127.0.0.1:7000/bing/image?text=rust+mascot&limit=10"
 ```
 
-Image search:
+### 2. Megasearch with Reciprocal Rank Fusion (RRF)
+
+`/mega/search` executes across multiple search engines concurrently in parallel and combines results using industry-standard **Reciprocal Rank Fusion (RRF, $k=60$)**, consensus tracking, and cross-engine clustering:
 
 ```bash
-curl "http://127.0.0.1:7000/bing/image?text=golang+logo&limit=10"
+# Query Google, Bing, DuckDuckGo, and Hacker News simultaneously
+curl "http://127.0.0.1:7000/mega/search?engines=google,bing,duckduckgo,hackernews&text=rust+vs+go&limit=10"
 ```
 
-Megasearch:
+Response includes:
+- `score`: RRF fused ranking score.
+- `engine_consensus`: Number of engines confirming the result.
+- `engines`: Array of engines where the URL appeared.
+- `clusters`: Aggregated domain & URL occurrence statistics.
+
+### 3. Domain-Bounded Website Crawler (`/crawl`)
+
+Asynchronously crawl websites within strict domain boundaries with built-in SSRF protection:
 
 ```bash
-curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
-```
-
-`/mega/search` returns the same envelope as engine endpoints plus `clusters`: results are deduplicated by normalized URL, and clusters keep the per-engine occurrences and ranks.
-
-| Mode       | Best for                             | Behavior                                       |
-| ---------- | ------------------------------------ | ---------------------------------------------- |
-| `balanced` | Most multi-engine SERP workflows     | Queries engines in parallel and merges results |
-| `fast`     | Lowest latency                       | Uses the fastest available engine              |
-| `any`      | Fallback-style availability checking | Tries engines sequentially until one responds  |
-
-<details>
-<summary>More megasearch examples</summary>
-
-```bash
-# Fast mode
-curl "http://127.0.0.1:7000/mega/search?text=golang&mode=fast&engines=google,bing,yandex"
-
-# Any mode
-curl "http://127.0.0.1:7000/mega/search?text=golang&mode=any&engines=google,yandex,bing"
-
-# Balanced mode with aggregation controls
-curl "http://127.0.0.1:7000/mega/search?text=golang&mode=balanced&dedupe=true&merge=true"
-
-# Advanced filtering
-curl "http://127.0.0.1:7000/mega/search?text=golang&engines=google,bing&limit=20&date=20250101..20251231&lang=EN&region=US"
-
-# Image megasearch
-curl "http://127.0.0.1:7000/mega/image?text=golang+logo&limit=20"
-```
-
-</details>
-
-List engines:
-
-```bash
-curl "http://127.0.0.1:7000/mega/engines"
-```
-
-URL extraction:
-
-```bash
-# Extract one URL as JSON
-curl "http://127.0.0.1:7000/extract?url=https://example.com&mode=auto"
-
-# Return clean page markdown
-curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
-
-# Extract several URLs at once - returns a bare [{page_content, metadata}] array
-# (Open WebUI external loader compatible); failed URLs become items with metadata.error
-curl -X POST "http://127.0.0.1:7000/extract/batch" \
+curl -X POST "http://127.0.0.1:7000/crawl" \
   -H "Content-Type: application/json" \
-  -d '{"urls":["https://example.com","https://go.dev"],"mode":"fast"}'
-
-# Embed extracted content under the top search results
-curl "http://127.0.0.1:7000/google/search?text=llm+observability&extract=2&format=markdown"
+  -d '{
+    "start_url": "https://example.com",
+    "max_depth": 2,
+    "max_pages": 10,
+    "respect_robots": true,
+    "extract_markdown": true
+  }'
 ```
 
-## CLI Search
+Returns:
+- Page status and title
+- Readability-filtered clean Markdown content
+- Discovered internal links
+- Extracted OpenGraph and Schema.org JSON-LD structured data
 
-No server required - query an engine straight from the terminal. The CLI shares the same engines, formats, and filters as the API.
+### 4. Smart Rank Probing (`/{engine}/rank`)
+
+Tracks rankings for target domains or URLs with intelligent neighbor page windowing (`[P-1, P, P+1]`) to eliminate 70–90% of crawling overhead:
+
+```bash
+# Check where example.com ranks for "rust programming" on Google
+curl "http://127.0.0.1:7000/google/rank?target=example.com&keyword=rust+programming&strategy=smart"
+```
+
+### 5. Keyword Autocomplete & Suggestion (`/{engine}/suggest`)
+
+Instant search suggestions powered by OpenSearch APIs:
+
+```bash
+curl "http://127.0.0.1:7000/google/suggest?q=rust+async"
+# ["rust async", "rust async await", "rust async fn in trait", "rust async book"]
+```
+
+### 6. Drop-In 3rd-Party Compatibility (Serper & SerpApi)
+
+Zero-code replacement for existing SEO tools, scripts, and libraries:
+- **Serper API**: `POST http://127.0.0.1:7000/v1/serper/search`
+- **SerpApi**: `GET http://127.0.0.1:7000/v1/serpapi/search?q=...`
+
+Easily configure **SerpBear**, **OpenSEO**, **s33k**, or **LangChain** by simply pointing the API host to `http://localhost:7000`.
+
+### 7. Asynchronous Batch Rank Queue & Webhooks
+
+Queue large sets of keyword checks with bounded concurrency and outbound webhooks:
+
+```bash
+curl -X POST "http://127.0.0.1:7000/v1/rank/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook_url": "https://webhook.site/test",
+    "queries": [
+      {"engine": "google", "keyword": "rust api", "target": "github.com"},
+      {"engine": "bing", "keyword": "serp scraper", "target": "frontlanestudio"}
+    ]
+  }'
+```
+
+---
+
+## Model Context Protocol (MCP) Integration
+
+Frontlane SERP includes a native Model Context Protocol (MCP) server over standard I/O for **Claude Desktop**, **Cursor**, **Antigravity**, and **Claude Code**.
+
+Tools exposed to AI agents:
+- `serp_search`: Single-engine search (Google, Bing, DDG, Yandex, Baidu, Ecosia, HN, GitHub, Crates, Wiki).
+- `mega_search`: Multi-engine reciprocal rank fusion search.
+- `crawl_site`: Multi-page domain crawl with markdown & metadata extraction.
+- `extract_content`: Single-page content and metadata extraction.
+- `check_rank`: Domain/subdomain ranking checker.
+- `suggest_keywords`: Autocomplete suggestion generator.
+
+### Claude Desktop Configuration
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "frontlane-serp": {
+      "command": "/path/to/frontlane-serp",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Cursor Configuration
+
+Add to `.cursor/mcp.json` or Cursor Settings > MCP:
+
+```json
+{
+  "mcpServers": {
+    "frontlane-serp": {
+      "command": "/path/to/frontlane-serp",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+---
+
+## CLI Usage
+
+Query directly from your terminal without starting a server:
 
 ```sh
-openserp search ecosia "weather in london" --format markdown
-```
+# Basic search
+frontlane-serp search google "rust async web" --limit 10
 
-<details>
-<summary>CLI output and more examples</summary>
-
-```markdown
-# Search results for "weather in london"
-
-**Query:** weather in london - **Engines:** ecosia - **Took:** 866ms
-
-## Results
-
-### 1. London - BBC Weather
-
-**bbc.com › weather › 2643743** - organic
-
-Latest forecast for London ... Tonight will continue dry, and there will be mainly clear skies. Just a few patches of cloud drifting in from the north at times.
-
--> https://www.bbc.com/weather/2643743
-
-### 2. London (Greater London) weather - Met Office
-
-**weather.metoffice.gov.uk › forecast › gcpvj0v07** - organic
-
-Remaining warm with light winds and dry. Possibly cloudy at times Monday and Tuesday, then Wednesday sunnier conditions are likely.
-
--> https://weather.metoffice.gov.uk/forecast/gcpvj0v07
-
-### 3. London, London, United Kingdom Weather Forecast
-
-**accuweather.com › en › gb › london › ec4a-2 › wea…** - organic
-
-London, London, United Kingdom Weather Forecast, with current conditions, wind, air quality, and what to expect for the next 3 days.
-
--> https://www.accuweather.com/en/gb/london/ec4a-2/weather-forecast/328328
-```
-
-More CLI examples:
-
-```sh
-# JSON is the default format
-frontlane-serp search google "rust async web" --limit 20
-
-# Developer engines: Hacker News & GitHub
-frontlane-serp search hn "show hn AI" --limit 10
-frontlane-serp search gh "serp scraper" --limit 10
+# Developer engines
+frontlane-serp search hn "show hn AI" --limit 5
+frontlane-serp search gh "serp scraper" --limit 5
 frontlane-serp search crates "tokio" --limit 5
 frontlane-serp search wiki "Rust (programming language)" --limit 5
 
-# Plain text, German results
-frontlane-serp search yandex "wetter berlin" --format text --lang DE --region DE
-
-# Restrict to a site and stream NdJSON
+# Stream as NdJSON or Markdown
 frontlane-serp search bing "release notes" --site github.com --format ndjson
 
-# Embed clean page content & metadata from the top 2 results
+# Extract markdown content from top 2 search results
 frontlane-serp search google "llm observability" --extract 2 --format markdown
 
-# Rank checking with smart neighbor probing
+# Smart rank checking
 frontlane-serp rank github.com "rust serp api" --engine google --strategy smart
 
 # Keyword suggestions
 frontlane-serp suggest "async rust" --engine google
 
-# Domain-bounded website crawl
+# Domain crawl
 frontlane-serp crawl https://example.com --max-depth 2 --max-pages 10
 
-# Launch MCP server for Claude Desktop / Cursor / Antigravity
+# Launch MCP server
 frontlane-serp mcp
 ```
 
-</details>
+---
 
-Run `frontlane-serp search --help` for the full flag list. Engine names: `google`, `bing`, `duckduckgo` (`ddg`), `yandex`, `baidu`, `ecosia`, `hackernews` (`hn`), `github` (`gh`), `crates`, `wikipedia` (`wiki`).
+## Query Parameters Reference
 
-## Query Parameters
+| Parameter      | Description                                                                                             | Example                              |
+| -------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `text`         | Search query text                                                                                       | `rust programming`                   |
+| `lang`         | Language code                                                                                           | `EN`, `DE`, `RU`, `ES`               |
+| `region`       | Market/location hint (countries, locales, city names via Google `uule`, or Yandex `lr`)                 | `DE`, `en-GB`, `Berlin`, `213`       |
+| `date`         | Date range filter                                                                                       | `20250101..20251231`                 |
+| `file`         | File extension filter                                                                                   | `pdf`, `doc`, `xls`                  |
+| `site`         | Restrict results to a specific domain                                                                   | `github.com`                         |
+| `limit`        | Number of organic results to return (max 100)                                                           | `25`, `50`                           |
+| `start`        | Pagination offset                                                                                       | `0`, `10`, `20`                      |
+| `format`       | Output format: `json`, `markdown`, `text`, `ndjson`                                                     | `json`, `markdown`                   |
+| `extract`      | Fetch and embed target-page markdown & metadata for top results (depth 1-5 or boolean)                  | `1`, `3`, `true`                     |
+| `extract_mode` | Extraction strategy: `auto`, `fast` (raw HTTP), or `rendered`                                          | `auto`, `fast`                       |
 
-Common parameters:
-
-| Parameter      | Description                                                                                                                                                                                             | Example                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `text`         | Search query                                                                                                                                                                                            | `rust programming`                   |
-| `lang`         | Language code                                                                                                                                                                                           | `EN`, `DE`, `RU`, `ES`               |
-| `region`       | Market/location hint. Countries/locales work across engines; Google also accepts city names via `uule`; Yandex accepts numeric `lr`.                                                                    | `DE`, `en-GB`, `Berlin`, `213`       |
-| `date`         | Date range                                                                                                                                                                                              | `20250101..20251231`                 |
-| `file`         | File extension                                                                                                                                                                                          | `pdf`, `doc`, `xls`                  |
-| `site`         | Site-specific search                                                                                                                                                                                    | `github.com`                         |
-| `limit`        | Number of organic results, max 100.                                                                                                                                                                     | `25`, `50`                           |
-| `start`        | Pagination offset                                                                                                                                                                                       | `0`, `10`, `20`                      |
-| `format`       | Output format                                                                                                                                                                                           | `json`, `markdown`, `text`, `ndjson` |
-| `extract`      | Fetch and embed target-page content & metadata for top web results. Depth: `0`/`false` off, `true`/`1` top result, `N` top N (1-5).                                                                    | `1`, `3`, `true`                     |
-| `extract_mode` | Extraction strategy: raw HTTP first, raw only, or browser-rendered                                                                                                                                      | `auto`, `fast`, `rendered`           |
+---
 
 ## Proxy Support
 
 Frontlane SERP supports HTTP, HTTPS, and SOCKS5 proxies.
 
-Simple global proxy:
-
 ```bash
+# Global proxy via CLI
 frontlane-serp serve --proxy socks5://127.0.0.1:1080
 frontlane-serp search bing "query" --proxy http://user:pass@127.0.0.1:8080
 ```
 
-Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
+Advanced tagged proxy pools and per-request overrides are available in [`config.yaml`](./config.yaml) via headers:
+- `X-Use-Proxy: <tag>`
+- `X-Use-Proxy: direct`
 
-## API Docs
+---
 
-Once the server is running, the interactive docs are available locally:
+## API Documentation
 
-- Swagger UI: `http://127.0.0.1:7000/docs`
-- OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
+Interactive documentation is served locally once the API server is running:
+- **Swagger UI**: `http://127.0.0.1:7000/docs`
+- **OpenAPI 3.0 Spec**: `http://127.0.0.1:7000/openapi.yaml` (also in [`docs/openapi.yaml`](./docs/openapi.yaml))
+- **Architecture Details**: See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 
-To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For architecture details, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
-
-## License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+---
 
 ## Contributing
 
-Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
+Contributions are welcome! Please read [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) for local development setup and guidelines.
 
-## Feedback & Community
+## License
 
-- [GitHub Issues](https://github.com/frontlanestudio/frontlane-serp/issues) - bugs, feature ideas, and reproducible issues.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
