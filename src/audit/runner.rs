@@ -30,17 +30,35 @@ pub async fn run_audit(
     };
 
     let rank_resp = probe_engine_rank(engine.clone(), &rank_req).await?;
+    run_audit_for_rank_response(
+        engine,
+        http_client,
+        target_domain,
+        target_url_override,
+        keyword,
+        &rank_resp,
+        competitor_limit,
+    )
+    .await
+}
 
+pub async fn run_audit_for_rank_response(
+    engine: Arc<dyn SearchEngine>,
+    http_client: &HttpClient,
+    target_domain: &str,
+    target_url_override: Option<&str>,
+    keyword: &str,
+    rank_resp: &crate::rank::RankResponse,
+    competitor_limit: usize,
+) -> Result<KeywordAuditReport, Box<dyn std::error::Error + Send + Sync>> {
     let target_url = if let Some(u) = target_url_override {
         u.to_string()
     } else if let Some(ref u) = rank_resp.url {
         u.clone()
+    } else if target_domain.starts_with("http://") || target_domain.starts_with("https://") {
+        target_domain.to_string()
     } else {
-        if target_domain.starts_with("http://") || target_domain.starts_with("https://") {
-            target_domain.to_string()
-        } else {
-            format!("https://{}/", target_domain.trim_start_matches("www."))
-        }
+        format!("https://{}/", target_domain.trim_start_matches("www."))
     };
 
     // Filter competitor results from SERP

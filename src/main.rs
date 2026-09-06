@@ -723,26 +723,27 @@ async fn handle_batch_rank(
 
                     eprintln!("{}{}({}ms)", rank_str, top_preview, elapsed.as_millis());
 
-                    let serp_slice = if args.top_results > 0 {
-                        resp.serp_results.into_iter().take(args.top_results).collect()
-                    } else {
-                        Vec::new()
-                    };
-
                     let audit_data = if args.audit {
                         eprint!(" [auditing top competitors...] ");
-                        frontlane_serp::audit::run_audit(
+                        frontlane_serp::audit::run_audit_for_rank_response(
                             engine.clone(),
                             http_client,
                             &args.target,
                             item.target_url.as_deref(),
                             &item.keyword,
-                            args.top_results.clamp(1, 5),
+                            &resp,
+                            args.top_results.clamp(1, 3),
                         )
                         .await
                         .ok()
                     } else {
                         None
+                    };
+
+                    let serp_slice = if args.top_results > 0 {
+                        resp.serp_results.into_iter().take(args.top_results).collect()
+                    } else {
+                        Vec::new()
                     };
 
                     results.push(BatchRankResultItem {
