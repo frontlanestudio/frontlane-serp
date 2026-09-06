@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, FlareproxAction,
+    AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, FlareproxAction,
     FlareproxArgs, RankArgs, SearchArgs, SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
@@ -29,6 +29,7 @@ use frontlane_serp::suggest::SuggestClient;
 fn to_output_format(fmt: CliFormat) -> OutputFormat {
     match fmt {
         CliFormat::Json => OutputFormat::Json,
+        CliFormat::Csv => OutputFormat::Text,
         CliFormat::Markdown => OutputFormat::Markdown,
         CliFormat::Text => OutputFormat::Text,
         CliFormat::Ndjson => OutputFormat::Ndjson,
@@ -112,7 +113,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             handle_crawl(&crawl_args, &http_client).await?;
         }
         Some(Commands::BatchRank(batch_args)) => {
-            handle_batch_rank(&batch_args, &engines).await?;
+            handle_batch_rank(&batch_args, &engines, &http_client).await?;
+        }
+        Some(Commands::Audit(audit_args)) => {
+            handle_audit(&audit_args, &engines, &http_client).await?;
         }
         Some(Commands::Mcp) => {
             handle_mcp(&engines, &http_client).await?;
@@ -349,6 +353,62 @@ async fn handle_rank(
     Ok(())
 }
 
+async fn handle_audit(
+    args: &AuditArgs,
+    engines: &[Arc<dyn SearchEngine>],
+    http_client: &HttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let norm_engine = match args.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = engines
+        .iter()
+        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
+        .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
+        .clone();
+
+    eprintln!(
+        "🔍 Running SERP competitor audit for '{}' on target '{}' using {}...",
+        args.query, args.target, norm_engine
+    );
+
+    let report = frontlane_serp::audit::run_audit(
+        engine,
+        http_client,
+        &args.target,
+        args.target_url.as_deref(),
+        &args.query,
+        args.limit,
+    )
+    .await
+    .map_err(|e| format!("{e}"))?;
+
+    let output_str = match args.format {
+        CliFormat::Json => report.to_json()?,
+        CliFormat::Csv => report.to_csv(),
+        CliFormat::Markdown => report.to_markdown(),
+        CliFormat::Text | CliFormat::Ndjson => report.to_console_text(),
+    };
+
+    if let Some(ref out_path) = args.output {
+        let content_to_write = if out_path.ends_with(".csv") {
+            report.to_csv()
+        } else if out_path.ends_with(".md") {
+            report.to_markdown()
+        } else {
+            report.to_json()?
+        };
+        tokio::fs::write(out_path, content_to_write).await?;
+        eprintln!("✅ Saved audit report to '{}'.", out_path);
+    }
+
+    println!("{}", output_str);
+
+    Ok(())
+}
+
 async fn handle_suggest(
     args: &SuggestArgs,
     http_client: &HttpClient,
@@ -480,11 +540,14 @@ struct BatchRankResultItem {
     error: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     serp_results: Vec<frontlane_serp::rank::SerpRankResultItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audit: Option<frontlane_serp::audit::KeywordAuditReport>,
 }
 
 async fn handle_batch_rank(
     args: &BatchRankArgs,
     engines: &[Arc<dyn SearchEngine>],
+    http_client: &HttpClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let norm_engine = match args.engine.to_lowercase().as_str() {
         "ddg" | "duck" => "duckduckgo".to_string(),
@@ -666,6 +729,22 @@ async fn handle_batch_rank(
                         Vec::new()
                     };
 
+                    let audit_data = if args.audit {
+                        eprint!(" [auditing top competitors...] ");
+                        frontlane_serp::audit::run_audit(
+                            engine.clone(),
+                            http_client,
+                            &args.target,
+                            item.target_url.as_deref(),
+                            &item.keyword,
+                            args.top_results.clamp(1, 5),
+                        )
+                        .await
+                        .ok()
+                    } else {
+                        None
+                    };
+
                     results.push(BatchRankResultItem {
                         keyword: item.keyword.clone(),
                         category: item.category.clone(),
@@ -681,6 +760,7 @@ async fn handle_batch_rank(
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         error: None,
                         serp_results: serp_slice,
+                        audit: audit_data,
                     });
                     break;
                 }
@@ -714,6 +794,7 @@ async fn handle_batch_rank(
                             timestamp: chrono::Utc::now().to_rfc3339(),
                             error: Some(err_msg),
                             serp_results: Vec::new(),
+                            audit: None,
                         });
                         break;
                     }
@@ -724,9 +805,14 @@ async fn handle_batch_rank(
         // Periodically write intermediate progress every 5 queries
         if let Some(ref out_path) = args.output {
             if count % 5 == 0 || count == total {
-                if let Ok(json_data) = serde_json::to_string_pretty(&results) {
-                    let _ = tokio::fs::write(out_path, json_data).await;
-                }
+                let inter_content = if out_path.ends_with(".csv") {
+                    batch_results_to_csv(&results)
+                } else if out_path.ends_with(".md") {
+                    batch_results_to_markdown(&results)
+                } else {
+                    serde_json::to_string_pretty(&results).unwrap_or_default()
+                };
+                let _ = tokio::fs::write(out_path, inter_content).await;
             }
         }
 
@@ -736,16 +822,100 @@ async fn handle_batch_rank(
     }
 
     if let Some(ref out_path) = args.output {
-        let json_data = serde_json::to_string_pretty(&results)?;
-        tokio::fs::write(out_path, json_data).await?;
+        let content_to_write = if out_path.ends_with(".csv") {
+            batch_results_to_csv(&results)
+        } else if out_path.ends_with(".md") {
+            batch_results_to_markdown(&results)
+        } else {
+            serde_json::to_string_pretty(&results)?
+        };
+        tokio::fs::write(out_path, content_to_write).await?;
         eprintln!("\n✅ Saved {} results to '{}'.", results.len(), out_path);
     }
 
-    if args.format == CliFormat::Json {
-        println!("{}", serde_json::to_string_pretty(&results)?);
+    match args.format {
+        CliFormat::Json => println!("{}", serde_json::to_string_pretty(&results)?),
+        CliFormat::Csv => println!("{}", batch_results_to_csv(&results)),
+        CliFormat::Markdown => println!("{}", batch_results_to_markdown(&results)),
+        CliFormat::Text | CliFormat::Ndjson => {}
     }
 
     Ok(())
+}
+
+fn batch_results_to_csv(results: &[BatchRankResultItem]) -> String {
+    let mut out = String::new();
+    out.push_str("keyword,category,priority,target_geo,target_url,ranked,rank,found_url,title,took_ms,top_competitor_1,top_competitor_2,top_competitor_3,key_recommendation\n");
+    for item in results {
+        let comp1 = item.serp_results.first().map(|r| r.url.as_str()).unwrap_or("");
+        let comp2 = item.serp_results.get(1).map(|r| r.url.as_str()).unwrap_or("");
+        let comp3 = item.serp_results.get(2).map(|r| r.url.as_str()).unwrap_or("");
+        let rec = item
+            .audit
+            .as_ref()
+            .and_then(|a| a.insights.first())
+            .map(|i| format!("[{}] {}", i.category, i.actionable_recommendation))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",{},\"{}\",\"{}\",\"{}\",{},\"{}\",\"{}\",\"{}\",\"{}\"\n",
+            escape_csv_field(&item.keyword),
+            escape_csv_field(item.category.as_deref().unwrap_or("")),
+            escape_csv_field(item.priority.as_deref().unwrap_or("")),
+            escape_csv_field(item.target_geo.as_deref().unwrap_or("")),
+            escape_csv_field(item.target_url.as_deref().unwrap_or("")),
+            item.ranked,
+            item.rank.map(|r| r.to_string()).unwrap_or_default(),
+            escape_csv_field(item.serp_url.as_deref().unwrap_or("")),
+            escape_csv_field(item.title.as_deref().unwrap_or("")),
+            item.took_ms,
+            escape_csv_field(comp1),
+            escape_csv_field(comp2),
+            escape_csv_field(comp3),
+            escape_csv_field(&rec),
+        ));
+    }
+    out
+}
+
+fn batch_results_to_markdown(results: &[BatchRankResultItem]) -> String {
+    let mut out = String::new();
+    out.push_str("# Batch Rank Tracking & Competitor Comparison Report\n\n");
+    out.push_str("| Keyword | Category | Rank | URL | Top Competitors | Primary Recommendation |\n");
+    out.push_str("| :--- | :--- | :---: | :--- | :--- | :--- |\n");
+    for item in results {
+        let rank_badge = if item.ranked {
+            format!("**#{}**", item.rank.unwrap_or(0))
+        } else {
+            "❌ Unranked".to_string()
+        };
+        let top_comp = item
+            .serp_results
+            .iter()
+            .take(2)
+            .filter_map(|r| r.domain.as_deref())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rec = item
+            .audit
+            .as_ref()
+            .and_then(|a| a.insights.first())
+            .map(|i| format!("**{}**: {}", i.category, i.actionable_recommendation))
+            .unwrap_or_else(|| "—".to_string());
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {} | {} | {} |\n",
+            item.keyword,
+            item.category.as_deref().unwrap_or("—"),
+            rank_badge,
+            item.serp_url.as_deref().unwrap_or("—"),
+            if top_comp.is_empty() { "—" } else { &top_comp },
+            rec
+        ));
+    }
+    out
+}
+
+fn escape_csv_field(s: &str) -> String {
+    s.replace('"', "\"\"").replace('\n', " ").replace('\r', "")
 }
 
 async fn handle_flareprox(

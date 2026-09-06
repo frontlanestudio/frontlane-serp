@@ -53,6 +53,9 @@ pub enum Commands {
     /// Run batch rank tracking from a file or list of keywords
     BatchRank(BatchRankArgs),
 
+    /// Audit and compare target page against top ranking SERP competitors for a keyword
+    Audit(AuditArgs),
+
     /// Run as a Model Context Protocol (MCP) server over stdio
     Mcp,
 
@@ -102,9 +105,42 @@ pub struct BatchRankArgs {
     #[arg(long, default_value = "10")]
     pub top_results: usize,
 
+    /// Perform full on-page competitor audit and gap analysis for each keyword
+    #[arg(long, default_value = "false")]
+    pub audit: bool,
+
     /// Output format to console
     #[arg(short = 'F', long, value_enum, default_value = "text")]
     pub format: CliFormat,
+}
+
+#[derive(Args, Debug)]
+pub struct AuditArgs {
+    /// Target domain (e.g. calljacob.com)
+    pub target: String,
+
+    /// Target keyword to audit against top ranking competitors
+    pub query: String,
+
+    /// Optional specific page URL on target domain to audit (defaults to root or found SERP URL)
+    #[arg(long)]
+    pub target_url: Option<String>,
+
+    /// Search engine: bing, duckduckgo, google, ecosia
+    #[arg(short, long, default_value = "bing")]
+    pub engine: String,
+
+    /// Number of top ranking competitors to audit (default: 10)
+    #[arg(short, long, default_value = "10")]
+    pub limit: usize,
+
+    /// Output format: text, json, csv, markdown
+    #[arg(short = 'F', long, value_enum, default_value = "text")]
+    pub format: CliFormat,
+
+    /// Optional file to save the report (.json, .csv, or .md)
+    #[arg(short, long)]
+    pub output: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -121,6 +157,7 @@ pub struct ServeArgs {
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CliFormat {
     Json,
+    Csv,
     Markdown,
     Text,
     Ndjson,
@@ -181,7 +218,7 @@ pub struct ExtractArgs {
     pub format: CliFormat,
 
     /// Check for /llms-full.txt and /llms.txt before scraping
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "false")]
     pub llms_txt: bool,
 }
 
