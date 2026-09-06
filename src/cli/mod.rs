@@ -67,7 +67,7 @@ pub struct BatchRankArgs {
     pub target: String,
 
     /// Input file containing keywords (.csv, .json, or .txt line-separated)
-    #[arg(short, long)]
+    #[arg(short = 'i', long)]
     pub file: String,
 
     /// Search engine: duckduckgo, google, bing, ecosia, etc.
@@ -82,6 +82,14 @@ pub struct BatchRankArgs {
     #[arg(long)]
     pub max: Option<usize>,
 
+    /// Offset / number of keywords to skip from the beginning
+    #[arg(long, default_value = "0")]
+    pub offset: usize,
+
+    /// Resume from existing output file, skipping already processed keywords
+    #[arg(long, default_value = "false")]
+    pub resume: bool,
+
     /// Delay in milliseconds between queries
     #[arg(long, default_value = "300")]
     pub delay_ms: u64,
@@ -91,7 +99,7 @@ pub struct BatchRankArgs {
     pub output: Option<String>,
 
     /// Output format to console
-    #[arg(short, long, value_enum, default_value = "text")]
+    #[arg(short = 'F', long, value_enum, default_value = "text")]
     pub format: CliFormat,
 }
 

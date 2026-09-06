@@ -80,7 +80,45 @@ struct ScriptItem {
     created_on: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct AccountItem {
+    id: String,
+    name: String,
+}
+
 impl CloudflareClient {
+    pub async fn resolve_account_id(api_token: &str) -> Result<String, FlareProxError> {
+        let client = Client::builder().timeout(Duration::from_secs(15)).build()?;
+        let resp = client
+            .get(format!("{}/accounts", CF_API_BASE))
+            .bearer_auth(api_token)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(FlareProxError::Api(format!(
+                "Failed to query accounts: HTTP {}",
+                resp.status()
+            )));
+        }
+
+        let cf_res: CfResponse<Vec<AccountItem>> = resp.json().await?;
+        let accounts = cf_res.result.unwrap_or_default();
+        if accounts.is_empty() {
+            return Err(FlareProxError::Api(
+                "No accessible Cloudflare accounts found for this token".to_string(),
+            ));
+        }
+
+        if let Some(frontlane) = accounts
+            .iter()
+            .find(|a| a.name.to_lowercase().contains("frontlane"))
+        {
+            return Ok(frontlane.id.clone());
+        }
+
+        Ok(accounts[0].id.clone())
+    }
     pub fn new(
         api_token: String,
         account_id: String,

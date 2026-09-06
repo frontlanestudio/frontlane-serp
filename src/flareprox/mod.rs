@@ -40,15 +40,48 @@ impl Default for FlareProxConfig {
     }
 }
 
+/// Tries to automatically detect the Cloudflare OAuth token from local Wrangler config
+pub fn detect_wrangler_token() -> Option<String> {
+    let mut candidate_paths = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        candidate_paths.push(format!(
+            "{}/Library/Preferences/.wrangler/config/default.toml",
+            home
+        ));
+        candidate_paths.push(format!("{}/.wrangler/config/default.toml", home));
+        candidate_paths.push(format!("{}/.config/.wrangler/config/default.toml", home));
+    }
+    for path_str in candidate_paths {
+        let p = std::path::Path::new(&path_str);
+        if p.exists() {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("oauth_token") {
+                        if let Some(val) = trimmed.split('=').nth(1) {
+                            let clean = val.trim().trim_matches('"').trim_matches('\'').trim();
+                            if !clean.is_empty() {
+                                return Some(clean.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 impl FlareProxConfig {
-    /// Resolves credentials with fallback to standard environment variables
+    /// Resolves credentials with fallback to standard environment variables or wrangler config
     pub fn resolved_credentials(&self) -> (Option<String>, Option<String>) {
         let token = self
             .api_token
             .clone()
             .filter(|s| !s.trim().is_empty())
             .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
-            .or_else(|| std::env::var("CF_API_TOKEN").ok());
+            .or_else(|| std::env::var("CF_API_TOKEN").ok())
+            .or_else(detect_wrangler_token);
 
         let account = self
             .account_id

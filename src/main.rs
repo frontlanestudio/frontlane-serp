@@ -546,13 +546,40 @@ async fn handle_batch_rank(
         }
     }
 
+    let mut results: Vec<BatchRankResultItem> = Vec::new();
+    let mut already_processed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    if let Some(ref out_path) = args.output {
+        if (args.resume || args.offset > 0) && tokio::fs::metadata(out_path).await.is_ok() {
+            if let Ok(content) = tokio::fs::read_to_string(out_path).await {
+                if let Ok(loaded) = serde_json::from_str::<Vec<BatchRankResultItem>>(&content) {
+                    for it in &loaded {
+                        already_processed.insert(it.keyword.clone());
+                    }
+                    results = loaded;
+                    eprintln!("📋 Loaded {} existing results from '{}'.", results.len(), out_path);
+                }
+            }
+        }
+    }
+
+    if args.resume {
+        items.retain(|it| !already_processed.contains(&it.keyword));
+    } else if args.offset > 0 {
+        if args.offset < items.len() {
+            items = items.split_off(args.offset);
+        } else {
+            items.clear();
+        }
+    }
+
     if let Some(max) = args.max {
         items.truncate(max);
     }
 
     let total = items.len();
     if total == 0 {
-        eprintln!("No keywords found in '{}'.", args.file);
+        eprintln!("No keywords to process (already finished or empty).");
         return Ok(());
     }
 
@@ -560,8 +587,6 @@ async fn handle_batch_rank(
         "🚀 Starting batch rank tracking for {} keywords on target '{}' using engine '{}'...",
         total, args.target, norm_engine
     );
-
-    let mut results: Vec<BatchRankResultItem> = Vec::with_capacity(total);
 
     for (idx, item) in items.into_iter().enumerate() {
         let count = idx + 1;
@@ -691,21 +716,38 @@ async fn handle_flareprox(
         .or_else(|| config.flareprox.api_token.clone())
         .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
         .or_else(|| std::env::var("CF_API_TOKEN").ok())
+        .or_else(frontlane_serp::flareprox::detect_wrangler_token)
         .filter(|s| !s.trim().is_empty())
         .ok_or(
-            "Cloudflare API Token required. Pass --token, set in config.yaml under flareprox.api_token, or export CLOUDFLARE_API_TOKEN.",
+            "Cloudflare API Token required. Pass --token, set in config.yaml under flareprox.api_token, export CLOUDFLARE_API_TOKEN, or log in with wrangler.",
         )?;
 
-    let account = args
+    let account = match args
         .account
         .clone()
         .or_else(|| config.flareprox.account_id.clone())
         .or_else(|| std::env::var("CLOUDFLARE_ACCOUNT_ID").ok())
         .or_else(|| std::env::var("CF_ACCOUNT_ID").ok())
         .filter(|s| !s.trim().is_empty())
-        .ok_or(
-            "Cloudflare Account ID required. Pass --account, set in config.yaml under flareprox.account_id, or export CLOUDFLARE_ACCOUNT_ID.",
-        )?;
+    {
+        Some(acc) => acc,
+        None => {
+            println!("🔍 Auto-detecting Cloudflare Account ID from token...");
+            match frontlane_serp::flareprox::CloudflareClient::resolve_account_id(&token).await {
+                Ok(acc) => {
+                    println!("  Using account ID: {}\n", acc);
+                    acc
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Cloudflare Account ID required: {}. Pass --account or set in config.yaml under flareprox.account_id.",
+                        e
+                    )
+                    .into());
+                }
+            }
+        }
+    };
 
     let prefix = args
         .prefix
