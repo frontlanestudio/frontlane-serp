@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    Cli, CliFormat, Commands, ExtractArgs, RankArgs, SearchArgs, SuggestArgs,
+    Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, RankArgs, SearchArgs, SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -106,6 +106,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Suggest(suggest_args)) => {
             handle_suggest(&suggest_args, &http_client).await?;
+        }
+        Some(Commands::Crawl(crawl_args)) => {
+            handle_crawl(&crawl_args, &http_client).await?;
         }
         Some(Commands::Mcp) => {
             handle_mcp(&engines, &http_client).await?;
@@ -366,5 +369,60 @@ async fn handle_mcp(
     ));
 
     run_stdio_mcp_server(engine_map, mega, extractor, suggest, crawler).await?;
+    Ok(())
+}
+
+async fn handle_crawl(
+    args: &CrawlArgs,
+    http_client: &HttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let extractor = Arc::new(Extractor::new(http_client.clone()));
+    let crawler = frontlane_serp::crawl::Crawler::new(http_client.clone(), extractor);
+
+    let options = frontlane_serp::crawl::CrawlOptions {
+        start_url: args.url.clone(),
+        max_depth: args.max_depth,
+        max_pages: args.max_pages,
+        concurrency: 4,
+        allowed_domains: vec![],
+        respect_robots: args.respect_robots,
+        extract_content: args.extract,
+    };
+
+    let result = crawler.crawl(options).await?;
+
+    if args.format == CliFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!(
+            "Crawled: {} ({} pages, {}ms)\n",
+            result.start_url, result.pages_crawled, result.took_ms
+        );
+        for (i, page) in result.pages.iter().enumerate() {
+            println!(
+                "[{}] {} (depth {}, status {})",
+                i + 1,
+                page.url,
+                page.depth,
+                page.status
+            );
+            if let Some(ref title) = page.title {
+                println!("    Title: {}", title);
+            }
+            println!("    Links found: {}", page.links.len());
+            if !page.json_ld.is_empty() {
+                println!("    JSON-LD items: {}", page.json_ld.len());
+            }
+            if !page.meta_tags.is_empty() {
+                println!("    Meta tags: {}", page.meta_tags.len());
+            }
+            if let Some(ref content) = page.content {
+                let snippet: String = content.chars().take(120).collect();
+                println!("    Content: {}...", snippet.trim().replace('\n', " "));
+            }
+            println!();
+        }
+    }
+
     Ok(())
 }

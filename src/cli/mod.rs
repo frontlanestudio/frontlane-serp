@@ -47,6 +47,9 @@ pub enum Commands {
     /// Fetch autocomplete keyword suggestions
     Suggest(SuggestArgs),
 
+    /// Crawl a website within domain bounds
+    Crawl(CrawlArgs),
+
     /// Run as a Model Context Protocol (MCP) server over stdio
     Mcp,
 }
@@ -186,6 +189,32 @@ pub struct SuggestArgs {
     /// Region code (e.g. us)
     #[arg(long, default_value = "us")]
     pub region: String,
+
+    /// Output format: json, text
+    #[arg(short, long, value_enum, default_value = "text")]
+    pub format: CliFormat,
+}
+
+#[derive(Args, Debug)]
+pub struct CrawlArgs {
+    /// Start URL to crawl
+    pub url: String,
+
+    /// Maximum crawl depth (default 2, max 5)
+    #[arg(short = 'd', long, default_value = "2")]
+    pub max_depth: usize,
+
+    /// Maximum pages to crawl (default 10, max 100)
+    #[arg(short = 'p', long, default_value = "10")]
+    pub max_pages: usize,
+
+    /// Respect robots.txt
+    #[arg(long, default_value = "true")]
+    pub respect_robots: bool,
+
+    /// Extract clean readable markdown
+    #[arg(long, default_value = "true")]
+    pub extract: bool,
 
     /// Output format: json, text
     #[arg(short, long, value_enum, default_value = "text")]
