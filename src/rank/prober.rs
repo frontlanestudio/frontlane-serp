@@ -184,7 +184,8 @@ pub async fn probe_engine_rank(
                     }
 
                     let is_dir = crate::core::domain::is_directory_domain(&item.domain)
-                        || item.domain_info.as_ref().map(|d| d.category.as_str()) == Some("directory");
+                        || item.domain_info.as_ref().map(|d| d.category.as_str())
+                            == Some("directory");
                     let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
 
                     serp_results.push(crate::rank::types::SerpRankResultItem {

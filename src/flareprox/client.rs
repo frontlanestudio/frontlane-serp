@@ -268,7 +268,10 @@ impl CloudflareClient {
             .collect();
         if let Some(r) = region {
             let clean_r = r.trim().to_lowercase().replace(':', "-");
-            format!("{}-{}-{}-{}", self.worker_prefix, clean_r, now, random_suffix)
+            format!(
+                "{}-{}-{}-{}",
+                self.worker_prefix, clean_r, now, random_suffix
+            )
         } else {
             format!("{}-{}-{}", self.worker_prefix, now, random_suffix)
         }

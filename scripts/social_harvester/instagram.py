@@ -1,14 +1,14 @@
-import os
-import sys
-import json
-import time
 import datetime
+import json
+import logging
+import time
 from pathlib import Path
 import instaloader
-import requests
 
 from .cookies import decrypt_chrome_cookies
-from .db import upsert_posts, upsert_account_details, DEFAULT_DB_PATH
+from .db import upsert_account_details, upsert_posts
+
+logger = logging.getLogger(__name__)
 
 STORAGE_BASE = Path("/Volumes/BKH/COMPETITORS/social-posts")
 GRAPHQL_DOC_ID = "7898261790222653"
@@ -16,7 +16,7 @@ GRAPHQL_DOC_ID = "7898261790222653"
 def setup_instagram_session():
     """Initializes Instaloader context with decrypted Chrome session cookies."""
     cookies = decrypt_chrome_cookies("instagram")
-    L = instaloader.Instaloader(
+    loader = instaloader.Instaloader(
         sleep=False,
         download_pictures=False,
         download_videos=False,
@@ -28,12 +28,12 @@ def setup_instagram_session():
     )
     if cookies:
         for k, v in cookies.items():
-            L.context._session.cookies.set(k, v, domain=".instagram.com")
+            loader.context._session.cookies.set(k, v, domain=".instagram.com")
         user_id = cookies.get("ds_user_id")
-        L.context.username = user_id
-    return L, cookies
+        loader.context.username = user_id
+    return loader, cookies
 
-def harvest_instagram_reels(session, user_pk, csrf_token="", max_reels=30):
+def harvest_instagram_reels(session, user_pk, csrf_token=None, max_reels=30):
     """
     Harvests Reels via Instagram internal Clips API:
     https://i.instagram.com/api/v1/clips/user/
@@ -43,12 +43,12 @@ def harvest_instagram_reels(session, user_pk, csrf_token="", max_reels=30):
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "X-IG-App-ID": "936619743392459",
-        "X-CSRFToken": csrf_token,
+        "X-CSRFToken": csrf_token or "",
         "Accept": "*/*",
     }
     reels = []
     max_id = None
-    
+
     try:
         data = {
             "target_user_id": str(user_pk),
@@ -56,7 +56,7 @@ def harvest_instagram_reels(session, user_pk, csrf_token="", max_reels=30):
         }
         if max_id:
             data["max_id"] = max_id
-            
+
         r = session.post(url, data=data, headers=headers, timeout=12)
         if r.status_code == 200:
             res_json = r.json()
@@ -69,18 +69,18 @@ def harvest_instagram_reels(session, user_pk, csrf_token="", max_reels=30):
                 reel_id = str(media.get("id") or media.get("pk", ""))
                 post_url = f"https://www.instagram.com/reel/{code}/"
                 caption = (media.get("caption") or {}).get("text", "") if isinstance(media.get("caption"), dict) else str(media.get("caption") or "")
-                
+
                 # Videos
                 video_versions = media.get("video_versions", [])
                 video_url = video_versions[0].get("url", "") if video_versions else ""
-                
+
                 # Image thumbnail
                 candidates = media.get("image_versions2", {}).get("candidates", [])
                 media_url = candidates[0].get("url", "") if candidates else ""
-                
+
                 ts = media.get("taken_at")
                 date_str = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ts else "N/A"
-                
+
                 reels.append({
                     "id": reel_id,
                     "shortcode": code,
@@ -95,12 +95,57 @@ def harvest_instagram_reels(session, user_pk, csrf_token="", max_reels=30):
                     "video_url": video_url,
                     "payload": media
                 })
-    except Exception as ex:
-        pass
-        
+    except Exception as exc:
+        logger.debug("Failed harvesting reels for user %s: %s", user_pk, exc)
+
     return reels
 
-def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=True):
+def _parse_instagram_node(node):
+    code = node.get("code") or node.get("shortcode")
+    if not code:
+        return None
+
+    post_id = str(node.get("id") or node.get("pk", ""))
+    post_url = f"https://www.instagram.com/p/{code}/"
+
+    cap_obj = node.get("caption")
+    if isinstance(cap_obj, dict):
+        caption_text = cap_obj.get("text", "")
+    else:
+        caption_text = str(cap_obj or node.get("accessibility_caption") or "")
+
+    media_type_num = node.get("media_type")
+    if media_type_num == 2 or node.get("video_versions"):
+        post_type = "video"
+    elif media_type_num == 8 or node.get("carousel_media"):
+        post_type = "carousel"
+    else:
+        post_type = "photo"
+
+    candidates = node.get("image_versions2", {}).get("candidates", [])
+    media_url = candidates[0].get("url", "") if candidates else (node.get("display_url") or "")
+    video_versions = node.get("video_versions", [])
+    video_url = video_versions[0].get("url", "") if video_versions else ""
+
+    ts = node.get("taken_at")
+    date_str = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ts else "N/A"
+
+    return {
+        "id": post_id,
+        "shortcode": code,
+        "url": post_url,
+        "date": date_str,
+        "caption": caption_text,
+        "likes": node.get("like_count", 0),
+        "comments": node.get("comment_count", 0),
+        "views": node.get("view_count"),
+        "type": post_type,
+        "media_url": media_url,
+        "video_url": video_url,
+        "payload": node
+    }
+
+def harvest_instagram_profile(loader, cookies, target, max_posts=80, include_reels=True):
     """
     Harvests competitor Instagram profile metadata, timeline posts, and Reels.
     Updates lawyers.db tables and writes /Volumes/BKH/COMPETITORS/social-posts/<domain>/instagram.json.
@@ -122,15 +167,14 @@ def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=Tr
                 d = json.load(f)
                 existing_posts = d.get("posts", [])
                 account_meta = d.get("account_details", {})
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as read_err:
+            logger.debug("Could not read existing instagram json: %s", read_err)
 
     posts_collected = []
     user_pk = None
     profile_details = {}
     after = None
     has_next = True
-    page = 0
 
     while has_next and len(posts_collected) < max_posts:
         page += 1
@@ -149,7 +193,7 @@ def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=Tr
             variables["first"] = 12
 
         try:
-            res = L.context.doc_id_graphql_query(
+            res = loader.context.doc_id_graphql_query(
                 GRAPHQL_DOC_ID,
                 variables,
                 f"https://www.instagram.com/{handle}/"
@@ -159,7 +203,7 @@ def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=Tr
             if "429" in err_msg:
                 time.sleep(15.0)
                 try:
-                    res = L.context.doc_id_graphql_query(GRAPHQL_DOC_ID, variables, f"https://www.instagram.com/{handle}/")
+                    res = loader.context.doc_id_graphql_query(GRAPHQL_DOC_ID, variables, f"https://www.instagram.com/{handle}/")
                 except Exception:
                     break
             else:
@@ -194,50 +238,9 @@ def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=Tr
             }
 
         for edge in edges:
-            node = edge.get("node", {})
-            code = node.get("code") or node.get("shortcode")
-            if not code:
-                continue
-
-            post_id = str(node.get("id") or node.get("pk", ""))
-            post_url = f"https://www.instagram.com/p/{code}/"
-
-            cap_obj = node.get("caption")
-            if isinstance(cap_obj, dict):
-                caption_text = cap_obj.get("text", "")
-            else:
-                caption_text = str(cap_obj or node.get("accessibility_caption") or "")
-
-            media_type_num = node.get("media_type")
-            if media_type_num == 2 or node.get("video_versions"):
-                post_type = "video"
-            elif media_type_num == 8 or node.get("carousel_media"):
-                post_type = "carousel"
-            else:
-                post_type = "photo"
-
-            candidates = node.get("image_versions2", {}).get("candidates", [])
-            media_url = candidates[0].get("url", "") if candidates else (node.get("display_url") or "")
-            video_versions = node.get("video_versions", [])
-            video_url = video_versions[0].get("url", "") if video_versions else ""
-
-            ts = node.get("taken_at")
-            date_str = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ts else "N/A"
-
-            posts_collected.append({
-                "id": post_id,
-                "shortcode": code,
-                "url": post_url,
-                "date": date_str,
-                "caption": caption_text,
-                "likes": node.get("like_count", 0),
-                "comments": node.get("comment_count", 0),
-                "views": node.get("view_count"),
-                "type": post_type,
-                "media_url": media_url,
-                "video_url": video_url,
-                "payload": node
-            })
+            parsed_post = _parse_instagram_node(edge.get("node", {}))
+            if parsed_post:
+                posts_collected.append(parsed_post)
 
         page_info = timeline.get("page_info", {})
         has_next = page_info.get("has_next_page", False)
@@ -248,7 +251,7 @@ def harvest_instagram_profile(L, cookies, target, max_posts=80, include_reels=Tr
     reels_collected = []
     if include_reels and user_pk:
         csrf = cookies.get("csrftoken", "")
-        reels_collected = harvest_instagram_reels(L.context._session, user_pk, csrf_token=csrf, max_reels=30)
+        reels_collected = harvest_instagram_reels(loader.context._session, user_pk, csrf_token=csrf, max_reels=30)
 
     # Merge posts
     post_map = {p["url"]: p for p in existing_posts if "url" in p}

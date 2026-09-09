@@ -112,25 +112,31 @@ def clean_title_to_keyword(title, domain):
             return c
     return candidates[0]
 
+def _match_region_cities(text_lower):
+    for region_name, cities in REGIONS.items():
+        for city in cities:
+            if re.search(rf'\b{re.escape(city)}\b', text_lower):
+                return region_name, city.title()
+    return None
+
 def detect_area(text, profile_city=None):
     if not text:
         text = ""
     lower_text = text.lower()
-    
-    for region_name, cities in REGIONS.items():
-        for city in cities:
-            if re.search(rf'\b{re.escape(city)}\b', lower_text):
-                return region_name, city.title()
-                
+
+    matched = _match_region_cities(lower_text)
+    if matched:
+        return matched
+
     if profile_city:
         p_city = profile_city.strip().rstrip(',').lower()
         for region_name, cities in REGIONS.items():
             if p_city in cities:
                 return region_name, p_city.title()
-                
+
     if 'california' in lower_text or ' ca' in lower_text:
         return "Statewide California", "California"
-        
+
     return "California (Unspecified / Local)", profile_city.title() if profile_city else "California"
 
 def categorize_practice(text, practice_terms):
@@ -225,7 +231,10 @@ def main():
 
         try:
             audit = json.loads(audit_str)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
+            audit = None
+
+        if not audit:
             continue
 
         pages = audit.get("pages", [])

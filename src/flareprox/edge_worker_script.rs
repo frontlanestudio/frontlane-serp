@@ -487,4 +487,3 @@ paths:
           description: Recycling result
 `;
 "#;
-

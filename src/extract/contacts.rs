@@ -18,12 +18,15 @@ static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 static PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     // Matches common US/NANP and international phone patterns:
     // +1 (800) 123-4567, 1-800-555-0199, (555) 019-2834, 555.019.2834, +44 20 7946 0919, etc.
-    Regex::new(r#"(?x)
+    Regex::new(
+        r#"(?x)
         (?:(?:\+|00)[1-9]\d{0,3}[\s.-]?)?       # Optional country code
         (?:\(?\d{2,4}\)?[\s.-]?)?               # Optional area code
         \d{3}[\s.-]?\d{4}                       # Core 7 digits
         (?:\s*(?:x|ext\.?|ext)\s*\d{1,5})?      # Optional extension
-    "#).unwrap()
+    "#,
+    )
+    .unwrap()
 });
 
 static US_STREET_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -69,10 +72,7 @@ pub struct ContactInfo {
 impl ContactInfo {
     pub fn to_console_text(&self) -> String {
         let mut out = String::new();
-        out.push_str(&format!(
-            "📞 Contacts Found for: {}\n",
-            self.target_url
-        ));
+        out.push_str(&format!("📞 Contacts Found for: {}\n", self.target_url));
         out.push_str(&format!(
             "Pages Scanned: {} | Scan Duration: {}ms\n",
             self.pages_scanned, self.took_ms
@@ -109,7 +109,10 @@ impl ContactInfo {
         }
         out.push('\n');
 
-        out.push_str(&format!("📍 Physical Addresses ({}):\n", self.addresses.len()));
+        out.push_str(&format!(
+            "📍 Physical Addresses ({}):\n",
+            self.addresses.len()
+        ));
         if self.addresses.is_empty() {
             out.push_str("  (none found)\n");
         } else {
@@ -124,7 +127,10 @@ impl ContactInfo {
         }
         out.push('\n');
 
-        out.push_str(&format!("🌐 Social & Profile Links ({}):\n", self.social_links.len()));
+        out.push_str(&format!(
+            "🌐 Social & Profile Links ({}):\n",
+            self.social_links.len()
+        ));
         if self.social_links.is_empty() {
             out.push_str("  (none found)\n");
         } else {
@@ -173,14 +179,23 @@ impl ContactInfo {
         if self.addresses.is_empty() {
             md.push_str("_No physical addresses found._\n\n");
         } else {
-            md.push_str("| Address | City | State | Postal Code | Discovered At |\n|---|---|---|---|---|\n");
+            md.push_str(
+                "| Address | City | State | Postal Code | Discovered At |\n|---|---|---|---|---|\n",
+            );
             for addr in &self.addresses {
                 let street = addr.street_address.as_deref().unwrap_or("-");
                 let city = addr.city.as_deref().unwrap_or("-");
                 let state = addr.state_or_region.as_deref().unwrap_or("-");
                 let zip = addr.postal_code.as_deref().unwrap_or("-");
-                let src = self.sources.get(&addr.formatted).map(|s| s.as_str()).unwrap_or("-");
-                md.push_str(&format!("| {} | {} | {} | {} | {} |\n", street, city, state, zip, src));
+                let src = self
+                    .sources
+                    .get(&addr.formatted)
+                    .map(|s| s.as_str())
+                    .unwrap_or("-");
+                md.push_str(&format!(
+                    "| {} | {} | {} | {} | {} |\n",
+                    street, city, state, zip, src
+                ));
             }
             md.push('\n');
         }
@@ -204,15 +219,31 @@ impl ContactInfo {
 
         for email in &self.emails {
             let src = self.sources.get(email).cloned().unwrap_or_default();
-            lines.push(format!("email,\"{}\",\"{}\"", email.replace('"', "\"\""), src));
+            lines.push(format!(
+                "email,\"{}\",\"{}\"",
+                email.replace('"', "\"\""),
+                src
+            ));
         }
         for phone in &self.phones {
             let src = self.sources.get(phone).cloned().unwrap_or_default();
-            lines.push(format!("phone,\"{}\",\"{}\"", phone.replace('"', "\"\""), src));
+            lines.push(format!(
+                "phone,\"{}\",\"{}\"",
+                phone.replace('"', "\"\""),
+                src
+            ));
         }
         for addr in &self.addresses {
-            let src = self.sources.get(&addr.formatted).cloned().unwrap_or_default();
-            lines.push(format!("address,\"{}\",\"{}\"", addr.formatted.replace('"', "\"\""), src));
+            let src = self
+                .sources
+                .get(&addr.formatted)
+                .cloned()
+                .unwrap_or_default();
+            lines.push(format!(
+                "address,\"{}\",\"{}\"",
+                addr.formatted.replace('"', "\"\""),
+                src
+            ));
         }
         for social in &self.social_links {
             lines.push(format!("social,\"{}\",\"\"", social.replace('"', "\"\"")));
@@ -316,7 +347,10 @@ pub fn extract_contacts_from_html(html: &str, page_url: &str) -> PageContacts {
         let state = cap.get(3).map(|m| m.as_str().trim().to_string());
         let zip = cap.get(4).map(|m| m.as_str().trim().to_string());
 
-        let full_address = cap.get(0).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+        let full_address = cap
+            .get(0)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
         if !full_address.is_empty() {
             page_contacts.addresses.insert(AddressInfo {
                 street_address: street,
@@ -338,24 +372,13 @@ fn extract_visible_text(document: &Html) -> String {
     let exclude_sel = Selector::parse("script, style, noscript, svg").unwrap();
 
     // Collect elements to exclude
-    let excluded_ids: HashSet<_> = document
-        .select(&exclude_sel)
-        .map(|el| el.id())
-        .collect();
+    let excluded_ids: HashSet<_> = document.select(&exclude_sel).map(|el| el.id()).collect();
 
     if let Some(body) = document.select(&body_sel).next() {
         for node in body.descendants() {
-            // Check if any ancestor is in excluded_ids
-            let mut current = node.parent();
-            let mut is_excluded = false;
-            while let Some(parent) = current {
-                if excluded_ids.contains(&parent.id()) {
-                    is_excluded = true;
-                    break;
-                }
-                current = parent.parent();
-            }
-
+            let is_excluded = node
+                .ancestors()
+                .any(|parent| excluded_ids.contains(&parent.id()));
             if !is_excluded {
                 if let Some(text) = node.value().as_text() {
                     let trimmed = text.trim();
@@ -376,18 +399,43 @@ fn traverse_json_ld_for_contacts(val: &serde_json::Value, contacts: &mut PageCon
             // Check for PostalAddress
             let is_address = map.get("@type").and_then(|t| t.as_str()) == Some("PostalAddress");
             if is_address {
-                let street = map.get("streetAddress").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let city = map.get("addressLocality").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let state = map.get("addressRegion").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let zip = map.get("postalCode").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let country = map.get("addressCountry").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                let street = map
+                    .get("streetAddress")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let city = map
+                    .get("addressLocality")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let state = map
+                    .get("addressRegion")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let zip = map
+                    .get("postalCode")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let country = map
+                    .get("addressCountry")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
 
                 let mut parts = Vec::new();
-                if let Some(ref s) = street { parts.push(s.clone()); }
-                if let Some(ref c) = city { parts.push(c.clone()); }
-                if let Some(ref st) = state { parts.push(st.clone()); }
-                if let Some(ref z) = zip { parts.push(z.clone()); }
-                if let Some(ref co) = country { parts.push(co.clone()); }
+                if let Some(ref s) = street {
+                    parts.push(s.clone());
+                }
+                if let Some(ref c) = city {
+                    parts.push(c.clone());
+                }
+                if let Some(ref st) = state {
+                    parts.push(st.clone());
+                }
+                if let Some(ref z) = zip {
+                    parts.push(z.clone());
+                }
+                if let Some(ref co) = country {
+                    parts.push(co.clone());
+                }
 
                 if !parts.is_empty() {
                     contacts.addresses.insert(AddressInfo {
@@ -481,15 +529,12 @@ pub fn normalize_phone_number(raw: &str) -> Option<String> {
     }
 
     // Reject sequences like 1111111111 or 1234567890 if trivially sequential
-    let digits: Vec<u32> = cleaned
-        .chars()
-        .filter_map(|c| c.to_digit(10))
-        .collect();
+    let digits: Vec<u32> = cleaned.chars().filter_map(|c| c.to_digit(10)).collect();
     if digits.iter().all(|&d| d == digits[0]) {
         return None;
     }
 
-    // Format standard 10-digit US numbers as (XXX) XXX-XXXX (and normalize 11-digit numbers starting with 1 to the same)
+    // Format standard 10-digit US numbers as (123) 456-7890 (and normalize 11-digit numbers starting with 1 to the same)
     if digit_count == 10 {
         let d: String = digits.into_iter().map(|d| d.to_string()).collect();
         return Some(format!("({}) {}-{}", &d[0..3], &d[3..6], &d[6..10]));
@@ -548,7 +593,11 @@ fn score_contact_link(url_str: &str) -> i32 {
     if lower.contains("about") {
         score += 30;
     }
-    if lower.contains("team") || lower.contains("people") || lower.contains("attorney") || lower.contains("staff") {
+    if lower.contains("team")
+        || lower.contains("people")
+        || lower.contains("attorney")
+        || lower.contains("staff")
+    {
         score += 20;
     }
     score
@@ -597,7 +646,10 @@ pub async fn scan_contacts(
         }
 
         // Fetch page HTML
-        let body = match http_client.fetch_raw_response(&curr_url, None, None, None, None).await {
+        let body = match http_client
+            .fetch_raw_response(&curr_url, None, None, None, None)
+            .await
+        {
             Ok((status, html)) if status.is_success() => html,
             _ => continue,
         };
@@ -623,7 +675,9 @@ pub async fn scan_contacts(
 
         for addr in page_data.addresses {
             if addresses_set.insert(addr.clone()) {
-                result.sources.insert(addr.formatted.clone(), curr_url.clone());
+                result
+                    .sources
+                    .insert(addr.formatted.clone(), curr_url.clone());
                 result.addresses.push(addr);
             }
         }
@@ -641,7 +695,9 @@ pub async fn scan_contacts(
                 if let Ok(u) = Url::parse(&raw_link) {
                     if let Some(host) = u.host_str() {
                         let host_lower = host.to_lowercase();
-                        if host_lower == target_host || host_lower.ends_with(&format!(".{}", target_host)) {
+                        if host_lower == target_host
+                            || host_lower.ends_with(&format!(".{}", target_host))
+                        {
                             let norm = normalize_url(&raw_link);
                             if !visited.contains(&norm) {
                                 let score = score_contact_link(&norm);
@@ -714,8 +770,14 @@ mod tests {
         let contacts = extract_contacts_from_html(html, "https://lawfirm.com");
         assert!(contacts.emails.contains("contact@lawfirm.com"));
         assert_eq!(contacts.phones.len(), 1);
-        assert!(contacts.social_links.iter().any(|s| s.contains("facebook.com/lawfirm")));
-        assert!(contacts.social_links.iter().any(|s| s.contains("linkedin.com/company/lawfirm")));
+        assert!(contacts
+            .social_links
+            .iter()
+            .any(|s| s.contains("facebook.com/lawfirm")));
+        assert!(contacts
+            .social_links
+            .iter()
+            .any(|s| s.contains("linkedin.com/company/lawfirm")));
     }
 
     #[test]
@@ -750,7 +812,10 @@ mod tests {
         assert!(contacts.emails.contains("justice@acmelegal.com"));
         assert_eq!(contacts.addresses.len(), 1);
         let addr = contacts.addresses.iter().next().unwrap();
-        assert_eq!(addr.street_address.as_deref(), Some("1000 Wilshire Blvd, Suite 500"));
+        assert_eq!(
+            addr.street_address.as_deref(),
+            Some("1000 Wilshire Blvd, Suite 500")
+        );
         assert_eq!(addr.city.as_deref(), Some("Los Angeles"));
         assert_eq!(addr.state_or_region.as_deref(), Some("CA"));
         assert_eq!(addr.postal_code.as_deref(), Some("90017"));
@@ -772,7 +837,10 @@ mod tests {
 
         let contacts = extract_contacts_from_html(html, "https://headquarters.org");
         assert!(contacts.emails.contains("hello@headquarters.org"));
-        assert!(contacts.phones.iter().any(|p| p.contains("818") && p.contains("555")));
+        assert!(contacts
+            .phones
+            .iter()
+            .any(|p| p.contains("818") && p.contains("555")));
         assert!(!contacts.addresses.is_empty());
         let addr = contacts.addresses.iter().next().unwrap();
         assert_eq!(addr.city.as_deref(), Some("Los Angeles"));

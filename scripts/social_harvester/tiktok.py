@@ -1,24 +1,32 @@
-import re
-import json
-import time
 import datetime
+import json
+import logging
+import re
 import subprocess
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .db import upsert_posts, upsert_account_details, DEFAULT_DB_PATH
+from .db import upsert_posts, upsert_account_details
+
+logger = logging.getLogger(__name__)
 
 STORAGE_BASE = Path("/Volumes/BKH/COMPETITORS/social-posts")
 
 def extract_tiktok_profile_stats(handle):
-    url = f"https://www.tiktok.com/@{handle}"
+    clean_handle = urllib.parse.quote(str(handle).strip().lstrip("@"))
+    url = f"https://www.tiktok.com/@{clean_handle}"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return {}
+
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
     )
     details = {}
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:  # nosec B310
             html = resp.read().decode("utf-8")
         match = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html)
         if match:
@@ -37,8 +45,8 @@ def extract_tiktok_profile_stats(handle):
                 "external_url": user_info.get("bioLink", {}).get("link", "") if isinstance(user_info.get("bioLink"), dict) else "",
                 "raw_json": user_detail
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed extracting tiktok profile for %s: %s", handle, exc)
     return details
 
 def harvest_tiktok_account(target, max_videos=30):
@@ -61,7 +69,7 @@ def harvest_tiktok_account(target, max_videos=30):
         "yt-dlp",
         "--dump-json",
         "--flat-playlist",
-        "--playlist-end", str(max_videos),
+        "--playlist-end", str(int(max_videos)),
         "--no-warnings",
         "--quiet",
         url
@@ -69,7 +77,7 @@ def harvest_tiktok_account(target, max_videos=30):
 
     posts = []
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=40, check=False)
         lines = res.stdout.strip().split("\n")
         for line in lines:
             if not line.strip():
@@ -80,7 +88,7 @@ def harvest_tiktok_account(target, max_videos=30):
                 web_url = data.get("url") or f"https://www.tiktok.com/@{handle}/video/{vid_id}"
                 title = data.get("title", "")
                 desc = data.get("description", "") or title
-                
+
                 posts.append({
                     "id": vid_id,
                     "url": web_url,
@@ -94,10 +102,10 @@ def harvest_tiktok_account(target, max_videos=30):
                     "type": "video",
                     "payload": data
                 })
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except (json.JSONDecodeError, KeyError, ValueError) as line_err:
+                logger.debug("Error parsing yt-dlp tiktok line: %s", line_err)
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("yt-dlp execution failed for tiktok: %s", exc)
 
     if posts:
         upsert_posts(domain, firm_name, "tiktok", posts)

@@ -49,7 +49,7 @@ mod imp {
     use std::time::Duration;
 
     use wreq::header::{HeaderName, HeaderValue};
-    use wreq_util::{Emulation, EmulationOS, EmulationOption};
+    use wreq_util::{Emulation, Platform, Profile};
 
     use crate::core::error::{Result, SerpError};
     use crate::core::proxy::ProxyLaneKey;
@@ -60,39 +60,15 @@ mod imp {
     /// would be its own tell. `wreq_util` bundles the matching TLS ClientHello,
     /// HTTP/2 SETTINGS/window-update behavior, and default header set for each
     /// exact release as one unit.
-    const PROFILE_POOL: &[(&str, Emulation, EmulationOS)] = &[
-        (
-            "chrome131/windows",
-            Emulation::Chrome131,
-            EmulationOS::Windows,
-        ),
-        (
-            "chrome133/windows",
-            Emulation::Chrome133,
-            EmulationOS::Windows,
-        ),
-        ("chrome135/macos", Emulation::Chrome135, EmulationOS::MacOS),
-        (
-            "chrome137/windows",
-            Emulation::Chrome137,
-            EmulationOS::Windows,
-        ),
-        (
-            "firefox136/windows",
-            Emulation::Firefox136,
-            EmulationOS::Windows,
-        ),
-        (
-            "firefox139/macos",
-            Emulation::Firefox139,
-            EmulationOS::MacOS,
-        ),
-        ("edge131/windows", Emulation::Edge131, EmulationOS::Windows),
-        (
-            "safari18_5/macos",
-            Emulation::Safari18_5,
-            EmulationOS::MacOS,
-        ),
+    const PROFILE_POOL: &[(&str, Profile, Platform)] = &[
+        ("chrome131/windows", Profile::Chrome131, Platform::Windows),
+        ("chrome133/windows", Profile::Chrome133, Platform::Windows),
+        ("chrome135/macos", Profile::Chrome135, Platform::MacOS),
+        ("chrome137/windows", Profile::Chrome137, Platform::Windows),
+        ("firefox136/windows", Profile::Firefox136, Platform::Windows),
+        ("firefox139/macos", Profile::Firefox139, Platform::MacOS),
+        ("edge131/windows", Profile::Edge131, Platform::Windows),
+        ("safari18_5/macos", Profile::Safari18_5, Platform::MacOS),
     ];
 
     /// Index into `PROFILE_POOL` used when there's no lane to key off of (a
@@ -116,18 +92,18 @@ mod imp {
             insecure: bool,
             timeout_secs: u64,
             label: &'static str,
-            emulation: Emulation,
-            emulation_os: EmulationOS,
+            profile: Profile,
+            platform: Platform,
         ) -> Result<Self> {
-            let profile = EmulationOption::builder()
-                .emulation(emulation)
-                .emulation_os(emulation_os)
+            let emulation = Emulation::builder()
+                .profile(profile)
+                .platform(platform)
                 .build();
 
             let mut builder = wreq::Client::builder()
-                .emulation(profile)
+                .emulation(emulation)
                 .timeout(Duration::from_secs(timeout_secs.max(5)))
-                .cert_verification(!insecure)
+                .tls_cert_verification(!insecure)
                 .gzip(true)
                 .brotli(true);
 

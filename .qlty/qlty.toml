@@ -1,0 +1,22 @@
+# Qlty configuration for frontlane-serp
+# See https://docs.qlty.sh for documentation
+
+exclude_patterns = [
+  "target/**",
+  "tests/fixtures/**",
+  "node_modules/**"
+]
+
+# Exclude editorconfig-checker on embedded JS templates and raw fixture assets
+[[exclude]]
+plugins = ["editorconfig-checker"]
+file_patterns = [
+  "tests/fixtures/**",
+  "src/flareprox/edge_worker_script.rs",
+  "src/flareprox/worker_script.rs"
+]
+
+# Suppress false-positive Trufflehog detections on test mock tokens and worker scripts
+[[triage]]
+match.rules = ["trufflehog:Lob"]
+set.ignored = true

@@ -1,20 +1,23 @@
+import hashlib
+import logging
 import os
-import sys
 import shutil
 import sqlite3
-import hashlib
-import tempfile
 import subprocess
+import tempfile
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+
+logger = logging.getLogger(__name__)
 
 def get_chrome_safe_storage_password():
     cmd = ["security", "find-generic-password", "-w", "-s", "Chrome Safe Storage", "-a", "Chrome"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return res.stdout.strip()
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("Failed to retrieve Chrome Safe Storage password: %s", exc)
         return None
 
 def decrypt_chrome_cookies(domain_pattern="instagram"):
@@ -31,7 +34,9 @@ def decrypt_chrome_cookies(domain_pattern="instagram"):
     if not chrome_cookie_path.exists():
         return get_cookies_browser_cookie3(domain_pattern)
 
-    tmp_db = tempfile.mktemp(suffix=".sqlite")
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp_file:
+        tmp_db = tmp_file.name
+
     try:
         shutil.copyfile(chrome_cookie_path, tmp_db)
         conn = sqlite3.connect(tmp_db)
@@ -51,10 +56,11 @@ def decrypt_chrome_cookies(domain_pattern="instagram"):
                         dec = dec[:-pad]
                 raw_val = dec[32:]
                 cookies[name] = raw_val.decode("utf-8")
-            except Exception:
-                pass
+            except (ValueError, KeyError, UnicodeDecodeError) as err:
+                logger.debug("Error decrypting cookie %s: %s", name, err)
         return cookies
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed reading chrome cookies database: %s", exc)
         return get_cookies_browser_cookie3(domain_pattern)
     finally:
         if os.path.exists(tmp_db):

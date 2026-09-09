@@ -512,4 +512,3 @@ pub enum EdgeAction {
         name: String,
     },
 }
-

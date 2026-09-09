@@ -3,9 +3,8 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, ContactsArgs, CrawlArgs,
-    ExtractArgs, FlareproxAction, FlareproxArgs, McpAction, RankArgs, SearchArgs,
-    SuggestArgs,
+    AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, ContactsArgs, CrawlArgs, ExtractArgs,
+    FlareproxAction, FlareproxArgs, McpAction, RankArgs, SearchArgs, SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -143,7 +142,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 skip_engines: doctor_args.skip_engines,
                 specific_engine: doctor_args.engine,
             };
-            frontlane_serp::cli::doctor::run_doctor(&config, &engines, &scraping_http_client, opts).await?;
+            frontlane_serp::cli::doctor::run_doctor(&config, &engines, &scraping_http_client, opts)
+                .await?;
         }
         Some(Commands::Mcp(mcp_args)) => match mcp_args.action {
             Some(McpAction::Install { client }) => {
@@ -848,12 +848,21 @@ async fn handle_batch_rank(
                     };
 
                     let dir_preview = if resp.directory_count > 0 {
-                        format!(" [📁 Dirs: {} ({:.0}%)]", resp.directory_count, resp.directory_share_pct)
+                        format!(
+                            " [📁 Dirs: {} ({:.0}%)]",
+                            resp.directory_count, resp.directory_share_pct
+                        )
                     } else {
                         String::new()
                     };
 
-                    eprintln!("{}{}{}({}ms)", rank_str, top_preview, dir_preview, elapsed.as_millis());
+                    eprintln!(
+                        "{}{}{}({}ms)",
+                        rank_str,
+                        top_preview,
+                        dir_preview,
+                        elapsed.as_millis()
+                    );
 
                     let audit_data = if args.audit {
                         eprint!(" [auditing top competitors...] ");
@@ -978,7 +987,8 @@ async fn handle_batch_rank(
     // Aggregate Directory Intelligence Summary across the batch
     let mut total_serp_positions = 0;
     let mut total_directory_positions = 0;
-    let mut dir_domain_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut dir_domain_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for r in &results {
         for s in &r.serp_results {
@@ -1000,8 +1010,14 @@ async fn handle_batch_rank(
             0.0
         };
 
-        eprintln!("\n📁 Directory Intelligence & Market Share across {} keywords:", results.len());
-        eprintln!("  • Directory SERP Share: {}/{} total positions ({:.1}%)", total_directory_positions, total_serp_positions, share_pct);
+        eprintln!(
+            "\n📁 Directory Intelligence & Market Share across {} keywords:",
+            results.len()
+        );
+        eprintln!(
+            "  • Directory SERP Share: {}/{} total positions ({:.1}%)",
+            total_directory_positions, total_serp_positions, share_pct
+        );
         if !sorted_dirs.is_empty() {
             eprintln!("  • Top Dominating Directories:");
             for (dir, cnt) in sorted_dirs.iter().take(8) {
@@ -1091,7 +1107,12 @@ fn batch_results_to_markdown(results: &[BatchRankResultItem]) -> String {
             .collect::<Vec<_>>()
             .join(", ");
         let dir_str = if item.directory_count > 0 {
-            format!("{}/{} ({:.0}%)", item.directory_count, item.serp_results.len(), item.directory_share_pct)
+            format!(
+                "{}/{} ({:.0}%)",
+                item.directory_count,
+                item.serp_results.len(),
+                item.directory_share_pct
+            )
         } else {
             "—".to_string()
         };
@@ -1174,10 +1195,17 @@ async fn handle_flareprox(
     let client = frontlane_serp::flareprox::CloudflareClient::new(token, account, Some(prefix))?;
 
     match &args.action {
-        FlareproxAction::Create { count, name, region } => {
+        FlareproxAction::Create {
+            count,
+            name,
+            region,
+        } => {
             let n = (*count).max(1);
             let region_label = region.as_deref().unwrap_or("default");
-            println!("🔥 Deploying {} FlareProx worker proxy endpoint(s) in region '{}'...", n, region_label);
+            println!(
+                "🔥 Deploying {} FlareProx worker proxy endpoint(s) in region '{}'...",
+                n, region_label
+            );
 
             let mut deployed = Vec::new();
             for i in 0..n {
@@ -1381,4 +1409,3 @@ async fn handle_edge(
     }
     Ok(())
 }
-

@@ -2,7 +2,9 @@ pub mod contacts;
 pub mod llmstxt;
 pub mod readability;
 
-pub use contacts::{extract_contacts_from_html, scan_contacts, AddressInfo, ContactInfo, PageContacts};
+pub use contacts::{
+    extract_contacts_from_html, scan_contacts, AddressInfo, ContactInfo, PageContacts,
+};
 
 use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolver};
 use crate::core::error::Result;

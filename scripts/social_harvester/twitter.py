@@ -1,32 +1,40 @@
-import re
-import json
-import time
 import datetime
+import json
+import logging
+import re
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .db import upsert_posts, upsert_account_details, DEFAULT_DB_PATH
+from .db import upsert_account_details
+
+logger = logging.getLogger(__name__)
 
 STORAGE_BASE = Path("/Volumes/BKH/COMPETITORS/social-posts")
 
 def extract_twitter_profile(handle):
-    url = f"https://twitter.com/{handle}"
+    clean_handle = urllib.parse.quote(str(handle).strip().lstrip("@"))
+    url = f"https://twitter.com/{clean_handle}"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return {}
+
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
     )
     details = {}
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:  # nosec B310
             html = resp.read().decode("utf-8")
         og_desc = re.search(r'<meta\s+property=\"og:description\"\s+content=\"([^\"]+)\"', html)
         og_title = re.search(r'<meta\s+property=\"og:title\"\s+content=\"([^\"]+)\"', html)
         og_image = re.search(r'<meta\s+property=\"og:image\"\s+content=\"([^\"]+)\"', html)
-        
+
         bio = og_desc.group(1).replace("&#x27;", "'").replace("&amp;", "&") if og_desc else ""
         title = og_title.group(1) if og_title else handle
         display_name = title.split("(@")[0].strip() if "(@" in title else title
-        
+
         details = {
             "display_name": display_name,
             "bio": bio,
@@ -36,8 +44,8 @@ def extract_twitter_profile(handle):
             "is_verified": False,
             "raw_json": {"og_title": title, "og_desc": bio}
         }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed extracting twitter profile for %s: %s", handle, exc)
     return details
 
 def harvest_twitter_account(target):

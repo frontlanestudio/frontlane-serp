@@ -469,6 +469,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MegaEnginesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /extract:
     get:
       tags: [Search]
@@ -724,6 +728,8 @@ paths:
             application/json:
               schema:
                 type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
 
   /v1/serpapi/search:
     get:
@@ -751,6 +757,8 @@ paths:
             application/json:
               schema:
                 type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
 
   /v1/rank/batch:
     post:
@@ -770,6 +778,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JobReceipt"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
 
   /v1/jobs/{id}:
     get:
@@ -789,6 +799,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JobStatus"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
 
   /health:
     get:
@@ -802,6 +816,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
         "503":
           description: Unhealthy service
           content:
@@ -820,6 +836,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessStatus"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
         "503":
           description: Instance is draining
           content:
@@ -838,6 +856,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
   /stats/cache:
     get:
       tags: [Stats]
@@ -850,6 +870,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CacheStats"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
   /stats/proxy:
     get:
       tags: [Stats]
@@ -862,6 +884,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProxyStats"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
   /stats/cb:
     get:
       tags: [Stats]
@@ -874,6 +898,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CircuitBreakerStatsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
   /openapi.yaml:
     get:
       tags: [Docs]
@@ -886,6 +912,8 @@ paths:
             application/yaml:
               schema:
                 type: string
+        "404":
+          $ref: "#/components/responses/NotFoundError"
   /docs:
     get:
       tags: [Docs]
@@ -898,6 +926,8 @@ paths:
             text/html:
               schema:
                 type: string
+        "404":
+          $ref: "#/components/responses/NotFoundError"
 components:
   parameters:
     EnginePath:

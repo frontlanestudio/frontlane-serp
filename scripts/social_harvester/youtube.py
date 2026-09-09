@@ -1,25 +1,49 @@
-import re
-import json
-import time
 import datetime
+import json
+import logging
+import re
 import subprocess
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .db import upsert_posts, upsert_account_details, DEFAULT_DB_PATH
+from .db import upsert_account_details, upsert_posts
+
+logger = logging.getLogger(__name__)
 
 STORAGE_BASE = Path("/Volumes/BKH/COMPETITORS/social-posts")
 
+def _parse_count_string(clean_num):
+    clean_num = clean_num.strip().lower()
+    if "k" in clean_num:
+        try:
+            return int(float(clean_num.replace("k", "")) * 1000)
+        except ValueError:
+            return 0
+    if "m" in clean_num:
+        try:
+            return int(float(clean_num.replace("m", "")) * 1000000)
+        except ValueError:
+            return 0
+    try:
+        return int(clean_num.replace(",", ""))
+    except ValueError:
+        return 0
+
 def extract_youtube_channel_stats(url):
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return {}
+
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
     )
     details = {}
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:  # nosec B310
             html = resp.read().decode("utf-8")
-        match = re.search(r'var ytInitialData = ({.*?});</script>', html)
+        match = re.search(r'var ytInitialData = ({[^<]+});</script>', html)
         if match:
             data = json.loads(match.group(1))
             header = data.get("header", {}).get("pageHeaderRenderer", {})
@@ -31,23 +55,13 @@ def extract_youtube_channel_stats(url):
             for r in metadata:
                 for p in r.get("metadataParts", []):
                     text = p.get("text", {}).get("content", "")
-                    if "subscriber" in text.lower():
-                        clean_num = text.lower().replace("subscribers", "").replace("subscriber", "").strip()
-                        if "k" in clean_num:
-                            sub_count = int(float(clean_num.replace("k", "")) * 1000)
-                        elif "m" in clean_num:
-                            sub_count = int(float(clean_num.replace("m", "")) * 1000000)
-                        else:
-                            try:
-                                sub_count = int(clean_num.replace(",", ""))
-                            except Exception:
-                                pass
-                    elif "video" in text.lower():
-                        clean_num = text.lower().replace("videos", "").replace("video", "").strip()
-                        try:
-                            vid_count = int(clean_num.replace(",", ""))
-                        except Exception:
-                            pass
+                    lower_text = text.lower()
+                    if "subscriber" in lower_text:
+                        clean_num = lower_text.replace("subscribers", "").replace("subscriber", "")
+                        sub_count = _parse_count_string(clean_num)
+                    elif "video" in lower_text:
+                        clean_num = lower_text.replace("videos", "").replace("video", "")
+                        vid_count = _parse_count_string(clean_num)
 
             details = {
                 "display_name": title,
@@ -56,8 +70,8 @@ def extract_youtube_channel_stats(url):
                 "is_verified": False,
                 "raw_json": content
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed extracting youtube stats for %s: %s", url, exc)
     return details
 
 def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
@@ -80,7 +94,7 @@ def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
         "yt-dlp",
         "--dump-json",
         "--flat-playlist",
-        "--playlist-end", str(max_videos),
+        "--playlist-end", str(int(max_videos)),
         "--no-warnings",
         "--quiet",
         url
@@ -88,7 +102,7 @@ def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
 
     posts = []
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=45, check=False)
         lines = res.stdout.strip().split("\n")
         for line in lines:
             if not line.strip():
@@ -98,7 +112,7 @@ def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
                 vid_id = data.get("id")
                 web_url = data.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
                 title = data.get("title", "")
-                
+
                 posts.append({
                     "id": vid_id,
                     "url": web_url,
@@ -110,10 +124,10 @@ def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
                     "type": "video",
                     "payload": data
                 })
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except (json.JSONDecodeError, KeyError, ValueError) as line_err:
+                logger.debug("Error parsing yt-dlp youtube line: %s", line_err)
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("yt-dlp execution failed for youtube: %s", exc)
 
     # Optional transcripts for top videos
     if download_transcripts and posts:
@@ -133,9 +147,9 @@ def harvest_youtube_channel(target, max_videos=30, download_transcripts=True):
                     p["url"]
                 ]
                 try:
-                    subprocess.run(t_cmd, timeout=20)
-                except Exception:
-                    pass
+                    subprocess.run(t_cmd, timeout=20, check=False)
+                except (subprocess.SubprocessError, OSError) as t_exc:
+                    logger.debug("Failed downloading transcript for %s: %s", vid_id, t_exc)
 
     if posts:
         upsert_posts(domain, firm_name, "youtube", posts)

@@ -1,5 +1,5 @@
-use std::time::Duration;
 use reqwest::Client;
+use std::time::Duration;
 
 use crate::config::AppConfig;
 use crate::flareprox::client::{resolve_placement, CloudflareClient, FlareProxDeployment};
@@ -21,7 +21,9 @@ pub async fn run_edge_deploy(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cfg_token, cfg_account) = config.flareprox.resolved_credentials();
     let token = token_opt.or(cfg_token).ok_or_else(|| {
-        FlareProxError::MissingCredentials("CLOUDFLARE_API_TOKEN is required. Set via env or config.yaml".to_string())
+        FlareProxError::MissingCredentials(
+            "CLOUDFLARE_API_TOKEN is required. Set via env or config.yaml".to_string(),
+        )
     })?;
 
     let account = match account_opt.or(cfg_account) {
@@ -32,21 +34,44 @@ pub async fn run_edge_deploy(
     let client = CloudflareClient::new(token, account, Some("flareprox".to_string()))?;
 
     let region_name = opts.region.as_deref().unwrap_or("de");
-    let placement = resolve_placement(region_name).unwrap_or_else(|| "aws:eu-central-1".to_string());
+    let placement =
+        resolve_placement(region_name).unwrap_or_else(|| "aws:eu-central-1".to_string());
 
     println!("\n  🚀 Frontlane SERP — Cloudflare Edge Stack Deployment");
     println!("  ─────────────────────────────────────────────────────────────");
-    println!("  Target Region:       {} (Placement: {})", region_name.to_uppercase(), placement);
+    println!(
+        "  Target Region:       {} (Placement: {})",
+        region_name.to_uppercase(),
+        placement
+    );
     println!("  Proxy Count:         {}", opts.proxies);
-    println!("  Auto-Recycling:      {}", if opts.auto_recycle { "Enabled (autonomous on-demand)" } else { "Disabled" });
-    println!("  Main Worker Name:    {}\n", opts.name.as_deref().unwrap_or("frontlane-serp-edge"));
+    println!(
+        "  Auto-Recycling:      {}",
+        if opts.auto_recycle {
+            "Enabled (autonomous on-demand)"
+        } else {
+            "Disabled"
+        }
+    );
+    println!(
+        "  Main Worker Name:    {}\n",
+        opts.name.as_deref().unwrap_or("frontlane-serp-edge")
+    );
 
     // 1. Deploy Regional Proxy Workers
     let mut proxy_deployments: Vec<FlareProxDeployment> = Vec::new();
     if opts.proxies > 0 {
-        println!("  Phase 1: Deploying {} regional FlareProx proxy lane(s)...", opts.proxies);
+        println!(
+            "  Phase 1: Deploying {} regional FlareProx proxy lane(s)...",
+            opts.proxies
+        );
         for i in 0..opts.proxies {
-            print!("    [{}/{}] Deploying proxy in {}... ", i + 1, opts.proxies, region_name.to_uppercase());
+            print!(
+                "    [{}/{}] Deploying proxy in {}... ",
+                i + 1,
+                opts.proxies,
+                region_name.to_uppercase()
+            );
             match client.create_worker(None, Some(region_name)).await {
                 Ok(dep) => {
                     println!("✔ {}", dep.url);
@@ -63,7 +88,9 @@ pub async fn run_edge_deploy(
 
     // 2. Deploy Main SERP Edge Worker
     println!("\n  Phase 2: Deploying Main SERP Edge Worker...");
-    let main_dep = client.deploy_main_edge_worker(opts.name.as_deref(), &proxy_urls, opts.auto_recycle).await?;
+    let main_dep = client
+        .deploy_main_edge_worker(opts.name.as_deref(), &proxy_urls, opts.auto_recycle)
+        .await?;
     println!("    ✔ Deployed Main Worker: {}", main_dep.url);
 
     // 3. Health & Verification Probe
@@ -86,10 +113,20 @@ pub async fn run_edge_deploy(
     println!("  API Base URL:        {}", main_dep.url);
     println!("  Interactive Docs:    {}/docs", main_dep.url);
     println!("  OpenAPI 3.0 Spec:    {}/openapi.yaml", main_dep.url);
-    println!("  Proxies Linked:      {} active in pool ({})", proxy_urls.len(), region_name.to_uppercase());
+    println!(
+        "  Proxies Linked:      {} active in pool ({})",
+        proxy_urls.len(),
+        region_name.to_uppercase()
+    );
     println!("\n  Quick Test Commands:");
-    println!("    curl \"{}/crates/search?text=tokio&limit=5\"", main_dep.url);
-    println!("    curl \"{}/mega/search?text=rust+async&limit=5\"\n", main_dep.url);
+    println!(
+        "    curl \"{}/crates/search?text=tokio&limit=5\"",
+        main_dep.url
+    );
+    println!(
+        "    curl \"{}/mega/search?text=rust+async&limit=5\"\n",
+        main_dep.url
+    );
 
     Ok(())
 }
@@ -133,8 +170,14 @@ pub async fn run_edge_status(
     }
 
     let workers = client.list_workers().await?;
-    let proxy_workers: Vec<_> = workers.iter().filter(|w| w.name.starts_with("flareprox")).collect();
-    println!("  Active Proxies:      {} FlareProx worker(s) deployed", proxy_workers.len());
+    let proxy_workers: Vec<_> = workers
+        .iter()
+        .filter(|w| w.name.starts_with("flareprox"))
+        .collect();
+    println!(
+        "  Active Proxies:      {} FlareProx worker(s) deployed",
+        proxy_workers.len()
+    );
     for p in proxy_workers {
         println!("    • {:<32} {}", p.name, p.url);
     }

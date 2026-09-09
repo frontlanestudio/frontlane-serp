@@ -1,12 +1,14 @@
-import re
-import json
-import time
 import datetime
+import json
+import logging
+import re
 from pathlib import Path
 import requests
 
-from .cookies import get_cookies_browser_cookie3, decrypt_chrome_cookies
-from .db import upsert_posts, upsert_account_details, DEFAULT_DB_PATH
+from .cookies import get_cookies_browser_cookie3
+from .db import upsert_account_details, upsert_posts
+
+logger = logging.getLogger(__name__)
 
 STORAGE_BASE = Path("/Volumes/BKH/COMPETITORS/social-posts")
 
@@ -23,6 +25,62 @@ def setup_linkedin_session():
     })
     return s
 
+def _extract_media_url(content):
+    if not isinstance(content, dict):
+        return ""
+    img_comp = content.get("imageComponent")
+    if img_comp and "images" in img_comp and len(img_comp["images"]) > 0:
+        img_data = img_comp["images"][0]
+        vec_img = img_data.get("detailData", {}).get("vectorImage", {})
+        root_url = vec_img.get("rootUrl", "")
+        artifacts = vec_img.get("artifacts", [])
+        if root_url and artifacts:
+            best_art = max(artifacts, key=lambda a: a.get("width", 0))
+            return root_url + best_art.get("fileIdentifyingUrlPathSegment", "")
+    return ""
+
+def _parse_linkedin_update(item, seen_urls):
+    entity_urn = item.get("entityUrn", "")
+    if "fs_updateV2:" not in entity_urn and "fsd_update:" not in entity_urn:
+        return None
+
+    m = re.search(r"activity:(\d+)", entity_urn)
+    if not m:
+        return None
+    act_id = m.group(1)
+    post_url = f"https://www.linkedin.com/feed/update/urn:li:activity:{act_id}/"
+    if post_url in seen_urls:
+        return None
+    seen_urls.add(post_url)
+
+    ts_ms = int(act_id) >> 22
+    published_at = datetime.datetime.fromtimestamp(ts_ms / 1000.0, tz=datetime.timezone.utc).isoformat()
+
+    commentary = item.get("commentary", {})
+    caption = commentary.get("text", {}).get("text", "") if isinstance(commentary, dict) else ""
+    if not caption:
+        caption = item.get("title", {}).get("text", "")
+
+    media_url = _extract_media_url(item.get("content", {}))
+
+    post_type = "firm_update"
+    cap_lower = caption.lower()
+    if any(k in cap_lower for k in ["settlement", "verdict", "recovered", "$", "million", "secured"]):
+        post_type = "case_settlement"
+    elif any(k in cap_lower for k in ["announce", "welcome", "proud", "honored", "pleased"]):
+        post_type = "announcement"
+    elif media_url:
+        post_type = "image"
+
+    return {
+        "url": post_url,
+        "date": published_at,
+        "type": post_type,
+        "caption": caption.strip(),
+        "media_url": media_url,
+        "payload": item
+    }
+
 def harvest_linkedin_company(session, target, max_posts=25):
     domain = target["domain"]
     handle = target["handle"]
@@ -35,10 +93,10 @@ def harvest_linkedin_company(session, target, max_posts=25):
     # Step 1: Query company info via Voyager API
     clean_handle = handle.split("/")[-1].split("?")[0]
     comp_url = f"https://www.linkedin.com/voyager/api/organization/companies?q=universalName&universalName={clean_handle}"
-    
+
     cid = None
     company_details = {}
-    
+
     try:
         r = session.get(comp_url, timeout=(5, 10))
         if r.status_code == 200:
@@ -49,7 +107,6 @@ def harvest_linkedin_company(session, target, max_posts=25):
                 if "fs_normalized_company:" in urn or "fs_miniCompany:" in urn:
                     cid = urn.split(":")[-1]
                 if inc.get("$type") == "com.linkedin.voyager.organization.Company" or "name" in inc:
-                    hq = inc.get("headquarter", {})
                     staff_range = inc.get("staffCountRange", {})
                     company_details = {
                         "display_name": inc.get("name") or firm_name,
@@ -63,8 +120,8 @@ def harvest_linkedin_company(session, target, max_posts=25):
                     }
                     if staff_range:
                         company_details["bio"] += f" | Staff: {staff_range.get('start', 0)}-{staff_range.get('end', '')}"
-    except Exception as ex:
-        pass
+    except Exception as exc:
+        logger.debug("Failed querying company info for %s: %s", clean_handle, exc)
 
     # Step 2: Query company feed updates
     posts = []
@@ -77,57 +134,11 @@ def harvest_linkedin_company(session, target, max_posts=25):
                 data = r.json()
                 included = data.get("included", [])
                 for item in included:
-                    entity_urn = item.get("entityUrn", "")
-                    if "fs_updateV2:" in entity_urn or "fsd_update:" in entity_urn:
-                        m = re.search(r"activity:(\d+)", entity_urn)
-                        if not m:
-                            continue
-                        act_id = m.group(1)
-                        post_url = f"https://www.linkedin.com/feed/update/urn:li:activity:{act_id}/"
-                        if post_url in seen_urls:
-                            continue
-                        seen_urls.add(post_url)
-
-                        ts_ms = int(act_id) >> 22
-                        published_at = datetime.datetime.fromtimestamp(ts_ms / 1000.0, tz=datetime.timezone.utc).isoformat()
-
-                        commentary = item.get("commentary", {})
-                        caption = commentary.get("text", {}).get("text", "") if isinstance(commentary, dict) else ""
-                        if not caption:
-                            caption = item.get("title", {}).get("text", "")
-
-                        media_url = ""
-                        content = item.get("content", {})
-                        if isinstance(content, dict):
-                            img_comp = content.get("imageComponent")
-                            if img_comp and "images" in img_comp and len(img_comp["images"]) > 0:
-                                img_data = img_comp["images"][0]
-                                vec_img = img_data.get("detailData", {}).get("vectorImage", {})
-                                root_url = vec_img.get("rootUrl", "")
-                                artifacts = vec_img.get("artifacts", [])
-                                if root_url and artifacts:
-                                    best_art = max(artifacts, key=lambda a: a.get("width", 0))
-                                    media_url = root_url + best_art.get("fileIdentifyingUrlPathSegment", "")
-
-                        post_type = "firm_update"
-                        cap_lower = caption.lower()
-                        if any(k in cap_lower for k in ["settlement", "verdict", "recovered", "$", "million", "secured"]):
-                            post_type = "case_settlement"
-                        elif any(k in cap_lower for k in ["announce", "welcome", "proud", "honored", "pleased"]):
-                            post_type = "announcement"
-                        elif media_url:
-                            post_type = "image"
-
-                        posts.append({
-                            "url": post_url,
-                            "date": published_at,
-                            "type": post_type,
-                            "caption": caption.strip(),
-                            "media_url": media_url,
-                            "payload": item
-                        })
-        except Exception as ex:
-            pass
+                    parsed = _parse_linkedin_update(item, seen_urls)
+                    if parsed:
+                        posts.append(parsed)
+        except Exception as exc:
+            logger.debug("Failed querying feed updates for cid %s: %s", cid, exc)
 
     # Save to SQLite
     if company_details:

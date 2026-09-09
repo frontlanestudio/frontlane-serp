@@ -66,7 +66,9 @@ fn test_flareprox_config_credentials_resolution() {
     let client = config.to_client().unwrap();
     assert_eq!(client.worker_prefix(), "flareprox");
     assert!(client.generate_worker_name(None).starts_with("flareprox-"));
-    assert!(client.generate_worker_name(Some("de")).starts_with("flareprox-de-"));
+    assert!(client
+        .generate_worker_name(Some("de"))
+        .starts_with("flareprox-de-"));
 }
 
 #[test]
@@ -139,22 +141,55 @@ async fn test_http_client_flareprox_gateway_routing() {
 fn test_regional_placement_mapping() {
     use frontlane_serp::flareprox::resolve_placement;
 
-    assert_eq!(resolve_placement("de"), Some("aws:eu-central-1".to_string()));
-    assert_eq!(resolve_placement("germany"), Some("aws:eu-central-1".to_string()));
-    assert_eq!(resolve_placement("frankfurt"), Some("aws:eu-central-1".to_string()));
+    assert_eq!(
+        resolve_placement("de"),
+        Some("aws:eu-central-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("germany"),
+        Some("aws:eu-central-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("frankfurt"),
+        Some("aws:eu-central-1".to_string())
+    );
     assert_eq!(resolve_placement("uk"), Some("aws:eu-west-2".to_string()));
     assert_eq!(resolve_placement("gb"), Some("aws:eu-west-2".to_string()));
-    assert_eq!(resolve_placement("london"), Some("aws:eu-west-2".to_string()));
+    assert_eq!(
+        resolve_placement("london"),
+        Some("aws:eu-west-2".to_string())
+    );
     assert_eq!(resolve_placement("us"), Some("aws:us-east-1".to_string()));
-    assert_eq!(resolve_placement("jp"), Some("aws:ap-northeast-1".to_string()));
-    assert_eq!(resolve_placement("japan"), Some("aws:ap-northeast-1".to_string()));
-    assert_eq!(resolve_placement("sg"), Some("aws:ap-southeast-1".to_string()));
-    assert_eq!(resolve_placement("singapore"), Some("aws:ap-southeast-1".to_string()));
-    assert_eq!(resolve_placement("au"), Some("aws:ap-southeast-2".to_string()));
+    assert_eq!(
+        resolve_placement("jp"),
+        Some("aws:ap-northeast-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("japan"),
+        Some("aws:ap-northeast-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("sg"),
+        Some("aws:ap-southeast-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("singapore"),
+        Some("aws:ap-southeast-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("au"),
+        Some("aws:ap-southeast-2".to_string())
+    );
 
     // Passthrough for explicit placement strings
-    assert_eq!(resolve_placement("aws:eu-central-1"), Some("aws:eu-central-1".to_string()));
-    assert_eq!(resolve_placement("gcp:europe-west3"), Some("gcp:europe-west3".to_string()));
+    assert_eq!(
+        resolve_placement("aws:eu-central-1"),
+        Some("aws:eu-central-1".to_string())
+    );
+    assert_eq!(
+        resolve_placement("gcp:europe-west3"),
+        Some("gcp:europe-west3".to_string())
+    );
 
     // Unknown region
     assert_eq!(resolve_placement("mars"), None);
@@ -175,4 +210,3 @@ fn test_edge_worker_script_properties() {
     assert!(EDGE_WORKER_JS.contains("/api/proxies/recycle"));
     assert!(EDGE_WORKER_JS.contains("/api/proxies/list"));
 }
-

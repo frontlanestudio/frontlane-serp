@@ -1063,14 +1063,7 @@ pub async fn extract_contacts_get_handler(
     let max_pages = params.max_pages.unwrap_or(10);
     let max_depth = params.max_depth.unwrap_or(2);
 
-    match crate::extract::scan_contacts(
-        &state.http_client,
-        &url,
-        crawl,
-        max_pages,
-        max_depth,
-    )
-    .await
+    match crate::extract::scan_contacts(&state.http_client, &url, crawl, max_pages, max_depth).await
     {
         Ok(contacts) => {
             let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
@@ -1125,14 +1118,7 @@ pub async fn extract_contacts_post_handler(
     let max_pages = payload.max_pages.unwrap_or(10);
     let max_depth = payload.max_depth.unwrap_or(2);
 
-    match crate::extract::scan_contacts(
-        &state.http_client,
-        &url,
-        crawl,
-        max_pages,
-        max_depth,
-    )
-    .await
+    match crate::extract::scan_contacts(&state.http_client, &url, crawl, max_pages, max_depth).await
     {
         Ok(contacts) => {
             let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
