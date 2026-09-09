@@ -18,72 +18,121 @@ pub fn parse_html(html_str: &str) -> Result<Vec<SearchResult>> {
         },
     )?;
 
+    let results = parse_items(&document, false);
+    let mut ad_results = parse_items(&document, true);
+    let mut all_results = results;
+    all_results.append(&mut ad_results);
+
+    let features = super::features::extract_ecosia_features(&document);
+    let results = crate::core::attach_features_to_results(all_results, features);
+
+    Ok(deduplicate_results(results))
+}
+
+fn extract_href(
+    item: &scraper::ElementRef,
+    link_sel: Option<&Selector>,
+    a_sel: Option<&Selector>,
+) -> Option<String> {
+    if let Some(l_sel) = link_sel {
+        if let Some(el) = item.select(l_sel).next() {
+            if let Some(h) = el.value().attr("href") {
+                let trimmed = h.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with("javascript:") {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    if let Some(a) = a_sel {
+        if let Some(el) = item.select(a).next() {
+            if let Some(h) = el.value().attr("href") {
+                let trimmed = h.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with("javascript:") {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_title(
+    item: &scraper::ElementRef,
+    title_sel: Option<&Selector>,
+    h23_sel: Option<&Selector>,
+) -> Option<String> {
+    if let Some(t_sel) = title_sel {
+        if let Some(el) = item.select(t_sel).next() {
+            let t = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    if let Some(h_sel) = h23_sel {
+        if let Some(el) = item.select(h_sel).next() {
+            let t = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
+
+fn extract_desc(item: &scraper::ElementRef, desc_sel: Option<&Selector>) -> String {
+    if let Some(d_sel) = desc_sel {
+        if let Some(el) = item.select(d_sel).next() {
+            return normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
+        }
+    }
+    String::new()
+}
+
+fn parse_items(document: &Html, is_ad: bool) -> Vec<SearchResult> {
     let mut results = Vec::new();
-    let res_sel = Selector::parse(RESULT).ok();
-    let ad_sel = Selector::parse(AD).ok();
+    let container_sel = if is_ad {
+        Selector::parse(AD).ok()
+    } else {
+        Selector::parse(RESULT).ok()
+    };
     let link_sel = Selector::parse(RESULT_LINK).ok();
     let a_sel = Selector::parse("a[href]").ok();
     let title_sel = Selector::parse(TITLE).ok();
     let h23_sel = Selector::parse("h2, h3").ok();
     let desc_sel = Selector::parse(DESC).ok();
 
-    let mut rank = 1;
-    if let Some(ref r_sel) = res_sel {
-        for item in document.select(r_sel) {
-            let mut href = String::new();
-            if let Some(ref l_sel) = link_sel {
-                if let Some(el) = item.select(l_sel).next() {
-                    if let Some(h) = el.value().attr("href") {
-                        href = h.trim().to_string();
-                    }
-                }
-            }
-            if href.is_empty() {
-                if let Some(ref a) = a_sel {
-                    if let Some(el) = item.select(a).next() {
-                        if let Some(h) = el.value().attr("href") {
-                            href = h.trim().to_string();
-                        }
-                    }
-                }
-            }
-
-            if href.is_empty() || href.starts_with("javascript:") {
+    if let Some(ref c_sel) = container_sel {
+        let mut rank = 1;
+        for item in document.select(c_sel) {
+            let Some(href) = extract_href(&item, link_sel.as_ref(), a_sel.as_ref()) else {
                 continue;
-            }
+            };
 
-            let mut title = String::new();
-            if let Some(ref t_sel) = title_sel {
-                if let Some(el) = item.select(t_sel).next() {
-                    title = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
+            let title = if is_ad {
+                extract_title(&item, title_sel.as_ref(), h23_sel.as_ref()).unwrap_or_default()
+            } else {
+                match extract_title(&item, title_sel.as_ref(), h23_sel.as_ref()) {
+                    Some(t) => t,
+                    None => continue,
                 }
-            }
-            if title.is_empty() {
-                if let Some(ref h_sel) = h23_sel {
-                    if let Some(el) = item.select(h_sel).next() {
-                        title = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
-                    }
-                }
-            }
-            if title.is_empty() {
-                continue;
-            }
+            };
 
-            let mut desc = String::new();
-            if let Some(ref d_sel) = desc_sel {
-                if let Some(el) = item.select(d_sel).next() {
-                    desc = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
-                }
-            }
+            let desc = extract_desc(&item, desc_sel.as_ref());
 
             results.push(SearchResult {
                 rank,
                 absolute_rank: rank,
-                result_type: ResultType::Organic,
+                result_type: if is_ad {
+                    ResultType::Ad
+                } else {
+                    ResultType::Organic
+                },
                 url: href,
                 title,
                 description: desc,
-                ad: false,
+                ad: is_ad,
                 features: Vec::new(),
                 image_data: None,
                 image_source: None,
@@ -91,55 +140,7 @@ pub fn parse_html(html_str: &str) -> Result<Vec<SearchResult>> {
             rank += 1;
         }
     }
-
-    let mut ad_rank = 1;
-    if let Some(ref a_sel_block) = ad_sel {
-        for item in document.select(a_sel_block) {
-            let mut href = String::new();
-            if let Some(ref l_sel) = link_sel {
-                if let Some(el) = item.select(l_sel).next() {
-                    if let Some(h) = el.value().attr("href") {
-                        href = h.trim().to_string();
-                    }
-                }
-            }
-            if href.is_empty() || href.starts_with("javascript:") {
-                continue;
-            }
-
-            let mut title = String::new();
-            if let Some(ref t_sel) = title_sel {
-                if let Some(el) = item.select(t_sel).next() {
-                    title = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
-                }
-            }
-            let mut desc = String::new();
-            if let Some(ref d_sel) = desc_sel {
-                if let Some(el) = item.select(d_sel).next() {
-                    desc = normalize_whitespace(&el.text().collect::<Vec<_>>().join(" "));
-                }
-            }
-
-            results.push(SearchResult {
-                rank: ad_rank,
-                absolute_rank: ad_rank,
-                result_type: ResultType::Ad,
-                url: href,
-                title,
-                description: desc,
-                ad: true,
-                features: Vec::new(),
-                image_data: None,
-                image_source: None,
-            });
-            ad_rank += 1;
-        }
-    }
-
-    let features = super::features::extract_ecosia_features(&document);
-    let results = crate::core::attach_features_to_results(results, features);
-
-    Ok(deduplicate_results(results))
+    results
 }
 
 pub fn parse_image_html(html_str: &str) -> Result<Vec<SearchResult>> {

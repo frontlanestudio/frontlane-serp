@@ -5,7 +5,7 @@ use crate::core::engine::SearchEngine;
 use crate::core::response_builder::enrich_result;
 use crate::core::types::{Query, ResultType, SerpFeature};
 use crate::rank::matcher::matches_target;
-use crate::rank::types::{DeviceType, RankRequest, RankResponse, RankStrategy};
+use crate::rank::types::{RankRequest, RankResponse, RankStrategy};
 
 pub fn calculate_pages_to_probe(
     strategy: RankStrategy,
@@ -124,6 +124,93 @@ fn extract_feature_citations(features: &[SerpFeature], req: &RankRequest) -> Vec
     feature_citations
 }
 
+fn compute_directory_metrics(
+    serp_results: &[crate::rank::types::SerpRankResultItem],
+) -> (usize, f64, Vec<String>) {
+    let mut directory_count = 0;
+    let mut ranking_directories = Vec::new();
+    for res in serp_results {
+        if res.is_directory {
+            directory_count += 1;
+            let dir_name = res.domain.as_deref().unwrap_or(&res.url);
+            ranking_directories.push(format!("{} (#{})", dir_name, res.rank));
+        }
+    }
+    let directory_share_pct = if !serp_results.is_empty() {
+        (directory_count as f64 / serp_results.len() as f64) * 100.0
+    } else {
+        0.0
+    };
+    (directory_count, directory_share_pct, ranking_directories)
+}
+
+fn resolve_ranked_hit(
+    ranked_hit: Option<crate::core::types::ResultItem>,
+) -> (bool, Option<usize>, Option<String>, Option<String>) {
+    match ranked_hit {
+        Some(hit) => {
+            let computed_rank = if hit.rank > 0 {
+                hit.rank
+            } else if let Some(ref pos) = hit.position {
+                pos.absolute
+            } else {
+                1
+            };
+            (true, Some(computed_rank), Some(hit.url), Some(hit.title))
+        }
+        None => (false, None, None, None),
+    }
+}
+
+async fn probe_single_page(
+    engine: &Arc<dyn SearchEngine>,
+    req: &RankRequest,
+    page: usize,
+) -> Result<
+    (Vec<crate::core::types::ResultItem>, Vec<SerpFeature>),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let start = (page - 1) * 10;
+    let q = Query {
+        text: req.q.clone(),
+        lang_code: req.lang.clone(),
+        region: req.region.clone(),
+        date_interval: String::new(),
+        filetype: String::new(),
+        site: String::new(),
+        limit: 10,
+        start,
+        filter: true,
+        features: true,
+        extract: false,
+        extract_top: 0,
+        extract_mode: "auto".to_string(),
+        extract_min_runes: 0,
+        proxy_url: None,
+        proxy_country: None,
+        proxy_class: None,
+        proxy_provider: None,
+        proxy_session_id: None,
+        proxy_override: None,
+        insecure: true,
+        guard_private_networks: false,
+    };
+
+    let raw_results = engine.search(&q).await?;
+    let mut enriched = Vec::new();
+    let mut features = Vec::new();
+
+    for raw in raw_results {
+        for f in &raw.features {
+            features.push(f.clone());
+        }
+        let item = enrich_result(raw, engine.name(), start);
+        enriched.push(item);
+    }
+
+    Ok((enriched, features))
+}
+
 pub async fn probe_engine_rank(
     engine: Arc<dyn SearchEngine>,
     req: &RankRequest,
@@ -134,60 +221,6 @@ pub async fn probe_engine_rank(
     let mut all_serp_features = Vec::new();
     let mut serp_results = Vec::new();
     let mut ranked_hit = None;
-
-    // Helper to probe a single page
-    async fn probe_single_page(
-        engine: &Arc<dyn SearchEngine>,
-        req: &RankRequest,
-        page: usize,
-    ) -> Result<
-        (Vec<crate::core::types::ResultItem>, Vec<SerpFeature>),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        let start = (page - 1) * 10;
-        let q = Query {
-            text: req.q.clone(),
-            lang_code: req.lang.clone(),
-            region: req.region.clone(),
-            date_interval: String::new(),
-            filetype: String::new(),
-            site: String::new(),
-            limit: 10,
-            start,
-            filter: true,
-            features: true,
-            extract: false,
-            extract_top: 0,
-            extract_mode: "auto".to_string(),
-            extract_min_runes: 0,
-            proxy_url: None,
-            proxy_country: None,
-            proxy_class: None,
-            proxy_provider: None,
-            proxy_session_id: None,
-            proxy_override: None,
-            insecure: true,
-            guard_private_networks: false,
-        };
-
-        if req.device == DeviceType::Mobile {
-            // Can hint mobile via query or proxy headers
-        }
-
-        let raw_results = engine.search(&q).await?;
-        let mut enriched = Vec::new();
-        let mut features = Vec::new();
-
-        for raw in raw_results {
-            for f in &raw.features {
-                features.push(f.clone());
-            }
-            let item = enrich_result(raw, engine.name(), start);
-            enriched.push(item);
-        }
-
-        Ok((enriched, features))
-    }
 
     for page in &initial_pages {
         pages_scraped.push(*page);
@@ -216,36 +249,10 @@ pub async fn probe_engine_rank(
     }
 
     let feature_citations = extract_feature_citations(&all_serp_features, req);
-
-    let mut directory_count = 0;
-    let mut ranking_directories = Vec::new();
-    for res in &serp_results {
-        if res.is_directory {
-            directory_count += 1;
-            let dir_name = res.domain.as_deref().unwrap_or(&res.url);
-            ranking_directories.push(format!("{} (#{})", dir_name, res.rank));
-        }
-    }
-    let directory_share_pct = if !serp_results.is_empty() {
-        (directory_count as f64 / serp_results.len() as f64) * 100.0
-    } else {
-        0.0
-    };
-
+    let (directory_count, directory_share_pct, ranking_directories) =
+        compute_directory_metrics(&serp_results);
     let took_ms = started.elapsed().as_millis() as i64;
-    let (ranked, rank, url, title) = match ranked_hit {
-        Some(hit) => {
-            let computed_rank = if hit.rank > 0 {
-                hit.rank
-            } else if let Some(ref pos) = hit.position {
-                pos.absolute
-            } else {
-                1
-            };
-            (true, Some(computed_rank), Some(hit.url), Some(hit.title))
-        }
-        None => (false, None, None, None),
-    };
+    let (ranked, rank, url, title) = resolve_ranked_hit(ranked_hit);
 
     Ok(RankResponse {
         target: req.target.clone(),

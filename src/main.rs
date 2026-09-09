@@ -300,21 +300,7 @@ async fn handle_extract(
     Ok(())
 }
 
-async fn handle_rank(
-    args: &RankArgs,
-    engines: &[Arc<dyn SearchEngine>],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let norm_engine = match args.engine.to_lowercase().as_str() {
-        "ddg" | "duck" => "duckduckgo".to_string(),
-        n => n.to_string(),
-    };
-
-    let engine = engines
-        .iter()
-        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
-        .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
-        .clone();
-
+fn build_rank_request(args: &RankArgs) -> RankRequest {
     let strategy = match args.strategy.as_str() {
         "basic" => RankStrategy::Basic,
         "custom" => RankStrategy::Custom,
@@ -333,7 +319,7 @@ async fn handle_rank(
         _ => DeviceType::Desktop,
     };
 
-    let req = RankRequest {
+    RankRequest {
         target: args.target.clone(),
         q: args.query.clone(),
         strategy,
@@ -344,66 +330,88 @@ async fn handle_rank(
         device,
         region: "US".to_string(),
         lang: "en".to_string(),
+    }
+}
+
+fn print_rank_human_output(resp: &frontlane_serp::rank::RankResponse, directories: bool) {
+    if resp.ranked {
+        println!(
+            "🎯 RANK #{} | Target: {} | Engine: {} | URL: {}",
+            resp.rank.unwrap_or(0),
+            resp.target,
+            resp.engine,
+            resp.url.as_deref().unwrap_or("")
+        );
+    } else {
+        println!(
+            "❌ NOT RANKED | Target: {} | Checked {} pages | Engine: {}",
+            resp.target,
+            resp.pages_scraped.len(),
+            resp.engine
+        );
+    }
+
+    if resp.directory_count > 0 || directories {
+        let top_dirs = if resp.ranking_directories.is_empty() {
+            "None".to_string()
+        } else {
+            resp.ranking_directories.join(", ")
+        };
+        println!(
+            "📁 Directory Dominance: {}/{} results ({:.1}%) — {}",
+            resp.directory_count,
+            resp.serp_results.len(),
+            resp.directory_share_pct,
+            top_dirs
+        );
+    }
+
+    if !resp.serp_results.is_empty() {
+        println!("\nTop SERP Results ({}):", resp.serp_results.len());
+        for res in &resp.serp_results {
+            let badge = if res.is_target { " 🎯 [TARGET]" } else { "" };
+            let dir_badge = if res.is_directory {
+                " 📁 [DIRECTORY]"
+            } else {
+                ""
+            };
+            let domain_str = res
+                .domain
+                .as_deref()
+                .map(|d| format!(" ({})", d))
+                .unwrap_or_default();
+            println!(
+                "  #{}: {} - {}{}{}{}",
+                res.rank, res.url, res.title, domain_str, badge, dir_badge
+            );
+        }
+    }
+}
+
+async fn handle_rank(
+    args: &RankArgs,
+    engines: &[Arc<dyn SearchEngine>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let norm_engine = match args.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        n => n.to_string(),
     };
 
+    let engine = engines
+        .iter()
+        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
+        .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
+        .clone();
+
+    let req = build_rank_request(args);
     let resp = probe_engine_rank(engine, &req)
         .await
         .map_err(|e| format!("{e}"))?;
+
     if args.format == CliFormat::Json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
-        if resp.ranked {
-            println!(
-                "🎯 RANK #{} | Target: {} | Engine: {} | URL: {}",
-                resp.rank.unwrap_or(0),
-                resp.target,
-                resp.engine,
-                resp.url.as_deref().unwrap_or("")
-            );
-        } else {
-            println!(
-                "❌ NOT RANKED | Target: {} | Checked {} pages | Engine: {}",
-                resp.target,
-                resp.pages_scraped.len(),
-                resp.engine
-            );
-        }
-
-        if resp.directory_count > 0 || args.directories {
-            let top_dirs = if resp.ranking_directories.is_empty() {
-                "None".to_string()
-            } else {
-                resp.ranking_directories.join(", ")
-            };
-            println!(
-                "📁 Directory Dominance: {}/{} results ({:.1}%) — {}",
-                resp.directory_count,
-                resp.serp_results.len(),
-                resp.directory_share_pct,
-                top_dirs
-            );
-        }
-
-        if !resp.serp_results.is_empty() {
-            println!("\nTop SERP Results ({}):", resp.serp_results.len());
-            for res in &resp.serp_results {
-                let badge = if res.is_target { " 🎯 [TARGET]" } else { "" };
-                let dir_badge = if res.is_directory {
-                    " 📁 [DIRECTORY]"
-                } else {
-                    ""
-                };
-                let domain_str = res
-                    .domain
-                    .as_deref()
-                    .map(|d| format!(" ({})", d))
-                    .unwrap_or_default();
-                println!(
-                    "  #{}: {} - {}{}{}{}",
-                    res.rank, res.url, res.title, domain_str, badge, dir_badge
-                );
-            }
-        }
+        print_rank_human_output(&resp, args.directories);
     }
 
     Ok(())
@@ -784,6 +792,14 @@ async fn load_existing_batch_results(
     (results, seen)
 }
 
+fn is_retryable_rate_limit(err_msg: &str) -> bool {
+    let msg_lower = err_msg.to_lowercase();
+    msg_lower.contains("captcha")
+        || msg_lower.contains("blocked")
+        || msg_lower.contains("forbidden")
+        || msg_lower.contains("reset")
+}
+
 async fn handle_batch_rank(
     args: &BatchRankArgs,
     engines: &[Arc<dyn SearchEngine>],
@@ -929,12 +945,7 @@ async fn handle_batch_rank(
                 Err(e) => {
                     let err_msg = format!("{e}");
                     retries += 1;
-                    if retries <= max_retries
-                        && (err_msg.contains("captcha")
-                            || err_msg.contains("Blocked")
-                            || err_msg.contains("Forbidden")
-                            || err_msg.contains("reset"))
-                    {
+                    if retries <= max_retries && is_retryable_rate_limit(&err_msg) {
                         let backoff_secs = 5 * retries;
                         eprintln!("⏳ Rate limited ({err_msg}). Backing off for {backoff_secs}s before retry {retries}/{max_retries}...");
                         tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs as u64))

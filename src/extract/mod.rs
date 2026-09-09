@@ -6,7 +6,7 @@ pub use contacts::{
     extract_contacts_from_html, scan_contacts, AddressInfo, ContactInfo, PageContacts,
 };
 
-use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolver};
+use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolver, CloudflareClearance};
 use crate::core::error::Result;
 use crate::core::http_client::HttpClient;
 use crate::core::proxy::{LaneStore, ProxyLaneKey};
@@ -46,33 +46,26 @@ pub fn is_cloudflare_challenge(status: reqwest::StatusCode, body: &str) -> bool 
 /// Unlike Cloudflare's Turnstile, there's no cookie earned by solving one of
 /// these -- see `CaptchaChallengeKind` for why solving only gets you a
 /// token, not automatic access.
+fn extract_sitekey_attr(document: &scraper::Html, selector: &str) -> Option<String> {
+    let sel = scraper::Selector::parse(selector).ok()?;
+    let el = document.select(&sel).next()?;
+    let key = el.value().attr("data-sitekey")?.trim();
+    if !key.is_empty() {
+        Some(key.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn detect_third_party_captcha(body: &str) -> Option<CaptchaChallengeKind> {
     let document = scraper::Html::parse_document(body);
 
-    if let Ok(sel) = scraper::Selector::parse(".h-captcha[data-sitekey]") {
-        if let Some(el) = document.select(&sel).next() {
-            if let Some(key) = el.value().attr("data-sitekey") {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Some(CaptchaChallengeKind::HCaptcha {
-                        site_key: key.to_string(),
-                    });
-                }
-            }
-        }
+    if let Some(key) = extract_sitekey_attr(&document, ".h-captcha[data-sitekey]") {
+        return Some(CaptchaChallengeKind::HCaptcha { site_key: key });
     }
 
-    if let Ok(sel) = scraper::Selector::parse(".g-recaptcha[data-sitekey]") {
-        if let Some(el) = document.select(&sel).next() {
-            if let Some(key) = el.value().attr("data-sitekey") {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Some(CaptchaChallengeKind::RecaptchaV2 {
-                        site_key: key.to_string(),
-                    });
-                }
-            }
-        }
+    if let Some(key) = extract_sitekey_attr(&document, ".g-recaptcha[data-sitekey]") {
+        return Some(CaptchaChallengeKind::RecaptchaV2 { site_key: key });
     }
 
     // reCAPTCHA v3 (and "invisible" v2) has no DOM widget with a
@@ -80,15 +73,17 @@ pub fn detect_third_party_captcha(body: &str) -> Option<CaptchaChallengeKind> {
     // <script src="https://www.google.com/recaptcha/api.js?render=SITE_KEY">
     if let Ok(sel) = scraper::Selector::parse(r#"script[src*="recaptcha/api.js"]"#) {
         for el in document.select(&sel) {
-            if let Some(src) = el.value().attr("src") {
-                if let Some(key) = query_param(src, "render") {
-                    if key != "explicit" && !key.is_empty() {
-                        return Some(CaptchaChallengeKind::RecaptchaV3 {
-                            site_key: key,
-                            action: None,
-                        });
-                    }
-                }
+            let Some(src) = el.value().attr("src") else {
+                continue;
+            };
+            let Some(key) = query_param(src, "render") else {
+                continue;
+            };
+            if key != "explicit" && !key.is_empty() {
+                return Some(CaptchaChallengeKind::RecaptchaV3 {
+                    site_key: key,
+                    action: None,
+                });
             }
         }
     }
@@ -145,6 +140,96 @@ impl Extractor {
             .await
     }
 
+    async fn resolve_cached_clearance(
+        &self,
+        url: &str,
+        lane_key: Option<&ProxyLaneKey>,
+    ) -> Option<CloudflareClearance> {
+        let domain = url::Url::parse(url).ok()?.host_str()?.to_string();
+
+        if let (Some(ref lanes), Some(key)) = (&self.lane_store, lane_key) {
+            if !domain.is_empty() {
+                return lanes.get_clearance(key, &domain).await;
+            }
+        }
+        None
+    }
+
+    async fn bypass_cloudflare_challenge(
+        &self,
+        url: &str,
+        proxy_url: Option<&str>,
+        lane_key: Option<&ProxyLaneKey>,
+        now: &str,
+    ) -> Option<ExtractedContent> {
+        let solver = self.solver.as_ref()?;
+        if !solver.is_enabled() {
+            return None;
+        }
+
+        let ua = self.http_client.user_agent();
+        let clearance = match solver.solve_cloudflare_challenge(url, proxy_url, ua).await {
+            Ok(c) => c,
+            Err(e) => {
+                return Some(empty_extracted_content(
+                    "fast",
+                    Some(format!("cloudflare challenge solve failed: {}", e)),
+                    now.to_string(),
+                ));
+            }
+        };
+
+        if let (Some(ref lanes), Some(key)) = (&self.lane_store, lane_key) {
+            lanes.set_clearance(key, clearance.clone()).await;
+        }
+
+        let cookie_header = format!("cf_clearance={}", clearance.cf_clearance);
+        match self
+            .http_client
+            .fetch_raw_response_with_proxy_and_lane(
+                url,
+                proxy_url,
+                None,
+                Some(&clearance.user_agent),
+                Some(&cookie_header),
+                None,
+                lane_key,
+            )
+            .await
+        {
+            Ok((bypassed_status, bypassed_body)) => {
+                if !is_cloudflare_challenge(bypassed_status, &bypassed_body)
+                    && (bypassed_status.is_success() || bypassed_status.as_u16() == 200)
+                {
+                    let page = readability::extract_page_content(&bypassed_body);
+                    let (json_ld, meta_tags) = extract_structured_metadata(&bypassed_body);
+                    Some(ExtractedContent {
+                        title: if !page.title.is_empty() {
+                            Some(page.title)
+                        } else {
+                            None
+                        },
+                        format: Some("markdown".to_string()),
+                        content: Some(page.markdown),
+                        mode_used: Some("fast+cf_clearance".to_string()),
+                        fetched_at: Some(now.to_string()),
+                        error: None,
+                        json_ld,
+                        meta_tags,
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                }
+            }
+            Err(e) => Some(empty_extracted_content(
+                "fast+cf_clearance",
+                Some(format!("failed to fetch after challenge solve: {}", e)),
+                now.to_string(),
+            )),
+        }
+    }
+
     pub async fn extract_with_options(
         &self,
         url: &str,
@@ -156,17 +241,7 @@ impl Extractor {
 
         // SSRF guard: validate that target URL is a public endpoint
         if let Err(e) = crate::core::network_guard::validate_public_url(url).await {
-            return Ok(ExtractedContent {
-                title: None,
-                format: Some("markdown".to_string()),
-                content: None,
-                mode_used: Some("blocked".to_string()),
-                fetched_at: Some(now),
-                error: Some(e.to_string()),
-                json_ld: Vec::new(),
-                meta_tags: std::collections::HashMap::new(),
-                ..Default::default()
-            });
+            return Ok(empty_extracted_content("blocked", Some(e.to_string()), now));
         }
 
         if use_llmstxt {
@@ -186,18 +261,7 @@ impl Extractor {
         }
 
         // 1. Check if we already have a cached cf_clearance in the lane
-        let domain = url::Url::parse(url)
-            .ok()
-            .and_then(|u| u.host_str().map(|h| h.to_string()))
-            .unwrap_or_default();
-
-        let mut existing_clearance = None;
-        if let (Some(ref lanes), Some(key)) = (&self.lane_store, lane_key) {
-            if !domain.is_empty() {
-                existing_clearance = lanes.get_clearance(key, &domain).await;
-            }
-        }
-
+        let existing_clearance = self.resolve_cached_clearance(url, lane_key).await;
         let initial_cookie = existing_clearance
             .as_ref()
             .map(|c| format!("cf_clearance={}", c.cf_clearance));
@@ -219,139 +283,36 @@ impl Extractor {
         {
             Ok(res) => res,
             Err(e) => {
-                return Ok(ExtractedContent {
-                    title: None,
-                    format: Some("markdown".to_string()),
-                    content: None,
-                    mode_used: Some("fast".to_string()),
-                    fetched_at: Some(now),
-                    error: Some(e.to_string()),
-                    json_ld: Vec::new(),
-                    meta_tags: std::collections::HashMap::new(),
-                    ..Default::default()
-                });
+                return Ok(empty_extracted_content("fast", Some(e.to_string()), now));
             }
         };
 
         // 3. Check for Cloudflare Challenge
         if is_cloudflare_challenge(status, &body) {
-            // Check if challenge solver is enabled
-            if let Some(ref solver) = self.solver {
-                if solver.is_enabled() {
-                    let ua = self.http_client.user_agent();
-                    match solver.solve_cloudflare_challenge(url, proxy_url, ua).await {
-                        Ok(clearance) => {
-                            // Save to lane store if available
-                            if let (Some(ref lanes), Some(key)) = (&self.lane_store, lane_key) {
-                                lanes.set_clearance(key, clearance.clone()).await;
-                            }
-
-                            // Re-request with obtained cf_clearance and matching user_agent
-                            let cookie_header = format!("cf_clearance={}", clearance.cf_clearance);
-                            match self
-                                .http_client
-                                .fetch_raw_response_with_proxy_and_lane(
-                                    url,
-                                    proxy_url,
-                                    None,
-                                    Some(&clearance.user_agent),
-                                    Some(&cookie_header),
-                                    None,
-                                    lane_key,
-                                )
-                                .await
-                            {
-                                Ok((bypassed_status, bypassed_body)) => {
-                                    if !is_cloudflare_challenge(bypassed_status, &bypassed_body)
-                                        && (bypassed_status.is_success()
-                                            || bypassed_status.as_u16() == 200)
-                                    {
-                                        let page =
-                                            readability::extract_page_content(&bypassed_body);
-                                        let (json_ld, meta_tags) =
-                                            extract_structured_metadata(&bypassed_body);
-                                        return Ok(ExtractedContent {
-                                            title: if !page.title.is_empty() {
-                                                Some(page.title)
-                                            } else {
-                                                None
-                                            },
-                                            format: Some("markdown".to_string()),
-                                            content: Some(page.markdown),
-                                            mode_used: Some("fast+cf_clearance".to_string()),
-                                            fetched_at: Some(now),
-                                            error: None,
-                                            json_ld,
-                                            meta_tags,
-                                            ..Default::default()
-                                        });
-                                    }
-                                }
-                                Err(e) => {
-                                    return Ok(ExtractedContent {
-                                        title: None,
-                                        format: Some("markdown".to_string()),
-                                        content: None,
-                                        mode_used: Some("fast+cf_clearance".to_string()),
-                                        fetched_at: Some(now),
-                                        error: Some(format!(
-                                            "failed to fetch after challenge solve: {}",
-                                            e
-                                        )),
-                                        json_ld: Vec::new(),
-                                        meta_tags: std::collections::HashMap::new(),
-                                        ..Default::default()
-                                    });
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            return Ok(ExtractedContent {
-                                title: None,
-                                format: Some("markdown".to_string()),
-                                content: None,
-                                mode_used: Some("fast".to_string()),
-                                fetched_at: Some(now),
-                                error: Some(format!("cloudflare challenge solve failed: {}", e)),
-                                json_ld: Vec::new(),
-                                meta_tags: std::collections::HashMap::new(),
-                                ..Default::default()
-                            });
-                        }
-                    }
-                }
+            if let Some(content) = self
+                .bypass_cloudflare_challenge(url, proxy_url, lane_key, &now)
+                .await
+            {
+                return Ok(content);
             }
 
-            // Cloudflare blocked and solver was not enabled or did not bypass
-            return Ok(ExtractedContent {
-                title: None,
-                format: Some("markdown".to_string()),
-                content: None,
-                mode_used: Some("fast".to_string()),
-                fetched_at: Some(now),
-                error: Some(format!(
+            return Ok(empty_extracted_content(
+                "fast",
+                Some(format!(
                     "blocked by Cloudflare challenge (HTTP {})",
                     status.as_u16()
                 )),
-                json_ld: Vec::new(),
-                meta_tags: std::collections::HashMap::new(),
-                ..Default::default()
-            });
+                now,
+            ));
         }
 
         // Check if other HTTP error
         if status.as_u16() == 403 || status.as_u16() == 407 {
-            return Ok(ExtractedContent {
-                title: None,
-                format: Some("markdown".to_string()),
-                content: None,
-                mode_used: Some("fast".to_string()),
-                fetched_at: Some(now),
-                error: Some(format!("HTTP status {}", status)),
-                json_ld: Vec::new(),
-                meta_tags: std::collections::HashMap::new(),
-                ..Default::default()
-            });
+            return Ok(empty_extracted_content(
+                "fast",
+                Some(format!("HTTP status {}", status)),
+                now,
+            ));
         }
 
         // Non-Cloudflare CAPTCHA gate (reCAPTCHA v2/v3, hCaptcha). These
@@ -409,6 +370,33 @@ impl Extractor {
     }
 }
 
+fn is_meaningful_meta_key(k: &str) -> bool {
+    k.starts_with("og:")
+        || k.starts_with("twitter:")
+        || matches!(
+            k,
+            "description" | "keywords" | "author" | "article:published_time" | "article:author"
+        )
+}
+
+fn empty_extracted_content(
+    mode: &str,
+    error: Option<String>,
+    fetched_at: String,
+) -> ExtractedContent {
+    ExtractedContent {
+        title: None,
+        format: Some("markdown".to_string()),
+        content: None,
+        mode_used: Some(mode.to_string()),
+        fetched_at: Some(fetched_at),
+        error,
+        json_ld: Vec::new(),
+        meta_tags: std::collections::HashMap::new(),
+        ..Default::default()
+    }
+}
+
 pub fn extract_structured_metadata(
     html: &str,
 ) -> (
@@ -449,16 +437,7 @@ pub fn extract_structured_metadata(
             if let (Some(k), Some(c)) = (key, content) {
                 let k_norm = k.trim().to_lowercase();
                 let c_trimmed = c.trim().to_string();
-                if !k_norm.is_empty()
-                    && !c_trimmed.is_empty()
-                    && (k_norm.starts_with("og:")
-                        || k_norm.starts_with("twitter:")
-                        || k_norm == "description"
-                        || k_norm == "keywords"
-                        || k_norm == "author"
-                        || k_norm == "article:published_time"
-                        || k_norm == "article:author")
-                {
+                if !k_norm.is_empty() && !c_trimmed.is_empty() && is_meaningful_meta_key(&k_norm) {
                     meta_tags.entry(k_norm).or_insert(c_trimmed);
                 }
             }

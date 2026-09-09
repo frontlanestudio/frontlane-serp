@@ -262,6 +262,40 @@ pub struct PageContacts {
     pub discovered_links: Vec<String>,
 }
 
+fn process_anchor_element(href: &str, base_url: Option<&Url>, page_contacts: &mut PageContacts) {
+    let href_trimmed = href.trim();
+
+    // Mailto
+    if let Some(rest) = href_trimmed.strip_prefix("mailto:") {
+        let email_clean = rest.split('?').next().unwrap_or("").trim().to_lowercase();
+        if is_valid_email(&email_clean) {
+            page_contacts.emails.insert(email_clean);
+        }
+        return;
+    }
+
+    // Tel
+    if let Some(rest) = href_trimmed.strip_prefix("tel:") {
+        let phone_clean = rest.split('?').next().unwrap_or("").trim();
+        if let Some(normalized) = normalize_phone_number(phone_clean) {
+            page_contacts.phones.insert(normalized);
+        }
+        return;
+    }
+
+    // Social Links or standard URLs
+    if let Some(base) = base_url {
+        if let Ok(resolved) = base.join(href_trimmed) {
+            let full_url = resolved.to_string();
+            if is_social_url(&full_url) {
+                page_contacts.social_links.insert(full_url);
+            } else {
+                page_contacts.discovered_links.push(full_url);
+            }
+        }
+    }
+}
+
 /// Extracts contact information from an HTML document.
 pub fn extract_contacts_from_html(html: &str, page_url: &str) -> PageContacts {
     let mut page_contacts = PageContacts::default();
@@ -272,33 +306,7 @@ pub fn extract_contacts_from_html(html: &str, page_url: &str) -> PageContacts {
     if let Ok(a_sel) = Selector::parse("a[href]") {
         for a_el in document.select(&a_sel) {
             if let Some(href) = a_el.value().attr("href") {
-                let href_trimmed = href.trim();
-
-                // Mailto
-                if let Some(rest) = href_trimmed.strip_prefix("mailto:") {
-                    let email_clean = rest.split('?').next().unwrap_or("").trim().to_lowercase();
-                    if is_valid_email(&email_clean) {
-                        page_contacts.emails.insert(email_clean);
-                    }
-                }
-                // Tel
-                else if let Some(rest) = href_trimmed.strip_prefix("tel:") {
-                    let phone_clean = rest.split('?').next().unwrap_or("").trim();
-                    if let Some(normalized) = normalize_phone_number(phone_clean) {
-                        page_contacts.phones.insert(normalized);
-                    }
-                }
-                // Social Links or standard URLs
-                else if let Some(ref base) = base_url {
-                    if let Ok(resolved) = base.join(href_trimmed) {
-                        let full_url = resolved.to_string();
-                        if is_social_url(&full_url) {
-                            page_contacts.social_links.insert(full_url);
-                        } else {
-                            page_contacts.discovered_links.push(full_url);
-                        }
-                    }
-                }
+                process_anchor_element(href, base_url.as_ref(), &mut page_contacts);
             }
         }
     }
@@ -393,60 +401,58 @@ fn extract_visible_text(document: &Html) -> String {
     texts.join(" ")
 }
 
+fn parse_postal_address_from_map(
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Option<AddressInfo> {
+    if map.get("@type").and_then(|t| t.as_str()) != Some("PostalAddress") {
+        return None;
+    }
+
+    let street = map
+        .get("streetAddress")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let city = map
+        .get("addressLocality")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let state = map
+        .get("addressRegion")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let zip = map
+        .get("postalCode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let country = map
+        .get("addressCountry")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+
+    let parts: Vec<String> = [&street, &city, &state, &zip, &country]
+        .iter()
+        .filter_map(|opt| (*opt).clone())
+        .collect();
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(AddressInfo {
+        street_address: street,
+        city,
+        state_or_region: state,
+        postal_code: zip,
+        country,
+        formatted: parts.join(", "),
+    })
+}
+
 fn traverse_json_ld_for_contacts(val: &serde_json::Value, contacts: &mut PageContacts) {
     match val {
         serde_json::Value::Object(map) => {
-            // Check for PostalAddress
-            let is_address = map.get("@type").and_then(|t| t.as_str()) == Some("PostalAddress");
-            if is_address {
-                let street = map
-                    .get("streetAddress")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string());
-                let city = map
-                    .get("addressLocality")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string());
-                let state = map
-                    .get("addressRegion")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string());
-                let zip = map
-                    .get("postalCode")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string());
-                let country = map
-                    .get("addressCountry")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string());
-
-                let mut parts = Vec::new();
-                if let Some(ref s) = street {
-                    parts.push(s.clone());
-                }
-                if let Some(ref c) = city {
-                    parts.push(c.clone());
-                }
-                if let Some(ref st) = state {
-                    parts.push(st.clone());
-                }
-                if let Some(ref z) = zip {
-                    parts.push(z.clone());
-                }
-                if let Some(ref co) = country {
-                    parts.push(co.clone());
-                }
-
-                if !parts.is_empty() {
-                    contacts.addresses.insert(AddressInfo {
-                        street_address: street,
-                        city,
-                        state_or_region: state,
-                        postal_code: zip,
-                        country,
-                        formatted: parts.join(", "),
-                    });
-                }
+            if let Some(address) = parse_postal_address_from_map(map) {
+                contacts.addresses.insert(address);
             }
 
             // Check telephone
@@ -603,6 +609,80 @@ fn score_contact_link(url_str: &str) -> i32 {
     score
 }
 
+#[derive(Default)]
+struct ContactAccumulator {
+    emails_set: HashSet<String>,
+    phones_set: HashSet<String>,
+    addresses_set: HashSet<AddressInfo>,
+    social_set: HashSet<String>,
+}
+
+impl ContactAccumulator {
+    fn add_page(&mut self, page_data: PageContacts, curr_url: &str, result: &mut ContactInfo) {
+        for email in page_data.emails {
+            if self.emails_set.insert(email.clone()) {
+                result.sources.insert(email.clone(), curr_url.to_string());
+                result.emails.push(email);
+            }
+        }
+
+        for phone in page_data.phones {
+            if self.phones_set.insert(phone.clone()) {
+                result.sources.insert(phone.clone(), curr_url.to_string());
+                result.phones.push(phone);
+            }
+        }
+
+        for addr in page_data.addresses {
+            if self.addresses_set.insert(addr.clone()) {
+                result
+                    .sources
+                    .insert(addr.formatted.clone(), curr_url.to_string());
+                result.addresses.push(addr);
+            }
+        }
+
+        for social in page_data.social_links {
+            if self.social_set.insert(social.clone()) {
+                result.social_links.push(social);
+            }
+        }
+    }
+}
+
+fn enqueue_discovered_links(
+    discovered_links: &[String],
+    target_host: &str,
+    depth: usize,
+    visited: &mut HashSet<String>,
+    queue: &mut std::collections::VecDeque<(String, usize)>,
+) {
+    let mut candidates: Vec<(String, i32)> = Vec::new();
+    for raw_link in discovered_links {
+        if let Ok(u) = Url::parse(raw_link) {
+            if let Some(host) = u.host_str() {
+                let host_lower = host.to_lowercase();
+                if host_lower == target_host || host_lower.ends_with(&format!(".{}", target_host)) {
+                    let norm = normalize_url(raw_link);
+                    if !visited.contains(&norm) {
+                        let score = score_contact_link(&norm);
+                        candidates.push((norm, score));
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort candidate links by relevance score (highest priority first)
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.1));
+
+    for (link, _) in candidates {
+        if visited.insert(link.clone()) {
+            queue.push_back((link, depth + 1));
+        }
+    }
+}
+
 pub async fn scan_contacts(
     http_client: &HttpClient,
     target_url: &str,
@@ -625,10 +705,7 @@ pub async fn scan_contacts(
         sources: HashMap::new(),
     };
 
-    let mut emails_set = HashSet::new();
-    let mut phones_set = HashSet::new();
-    let mut addresses_set = HashSet::new();
-    let mut social_set = HashSet::new();
+    let mut accumulator = ContactAccumulator::default();
 
     let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
     let mut visited: HashSet<String> = HashSet::new();
@@ -658,64 +735,13 @@ pub async fn scan_contacts(
 
         // Extract contacts from this page
         let page_data = extract_contacts_from_html(&body, &curr_url);
+        let discovered = page_data.discovered_links.clone();
 
-        for email in page_data.emails {
-            if emails_set.insert(email.clone()) {
-                result.sources.insert(email.clone(), curr_url.clone());
-                result.emails.push(email);
-            }
-        }
-
-        for phone in page_data.phones {
-            if phones_set.insert(phone.clone()) {
-                result.sources.insert(phone.clone(), curr_url.clone());
-                result.phones.push(phone);
-            }
-        }
-
-        for addr in page_data.addresses {
-            if addresses_set.insert(addr.clone()) {
-                result
-                    .sources
-                    .insert(addr.formatted.clone(), curr_url.clone());
-                result.addresses.push(addr);
-            }
-        }
-
-        for social in page_data.social_links {
-            if social_set.insert(social.clone()) {
-                result.social_links.push(social);
-            }
-        }
+        accumulator.add_page(page_data, &curr_url, &mut result);
 
         // If crawling is enabled and we haven't exceeded depth, sort and enqueue internal links
         if crawl && depth < max_depth_effective {
-            let mut candidates: Vec<(String, i32)> = Vec::new();
-            for raw_link in page_data.discovered_links {
-                if let Ok(u) = Url::parse(&raw_link) {
-                    if let Some(host) = u.host_str() {
-                        let host_lower = host.to_lowercase();
-                        if host_lower == target_host
-                            || host_lower.ends_with(&format!(".{}", target_host))
-                        {
-                            let norm = normalize_url(&raw_link);
-                            if !visited.contains(&norm) {
-                                let score = score_contact_link(&norm);
-                                candidates.push((norm, score));
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Sort candidate links by relevance score (highest priority first)
-            candidates.sort_by_key(|a| std::cmp::Reverse(a.1));
-
-            for (link, _) in candidates {
-                if visited.insert(link.clone()) {
-                    queue.push_back((link, depth + 1));
-                }
-            }
+            enqueue_discovered_links(&discovered, &target_host, depth, &mut visited, &mut queue);
         }
     }
 
