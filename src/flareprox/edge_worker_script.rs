@@ -242,17 +242,17 @@ function parseSimpleHtmlResults(html, limit, engine) {
   const results = [];
   const regex = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   const titleRegex = /<a[^>]+class="[^"]*result__url[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  
+
   // Extract results matching typical DDG HTML patterns
   const linkRegex = /<a class="result__url"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
   let match;
   let rank = 1;
   while ((match = linkRegex.exec(html)) !== null && rank <= limit) {
     const rawUrl = match[1].trim();
-    const cleanUrl = rawUrl.startsWith('//duckduckgo.com/l/?uddg=') 
-      ? decodeURIComponent(rawUrl.split('uddg=')[1].split('&')[0]) 
+    const cleanUrl = rawUrl.startsWith('//duckduckgo.com/l/?uddg=')
+      ? decodeURIComponent(rawUrl.split('uddg=')[1].split('&')[0])
       : rawUrl;
-    
+
     let domain = '';
     try { domain = new URL(cleanUrl).hostname; } catch (_) {}
 
@@ -272,7 +272,7 @@ function parseSimpleHtmlResults(html, limit, engine) {
 // Megasearch with Reciprocal Rank Fusion (RRF, k = 60)
 async function handleMegaSearch(query, limit, enginesParam, env, ctx, corsHeaders) {
   const requestedEngines = enginesParam ? enginesParam.split(',').map(s => s.trim().toLowerCase()) : ['crates', 'hackernews', 'wikipedia'];
-  
+
   const searchPromises = requestedEngines.map(e => searchEngine(e, query, limit, env, ctx));
   const engineResults = await Promise.all(searchPromises);
 
@@ -330,7 +330,7 @@ async function recycleProxy(burnedUrl, region, env) {
   try {
     const token = env.CF_API_TOKEN;
     const accountId = env.CF_ACCOUNT_ID;
-    
+
     // 1. Extract burned script name from URL
     const burnedName = new URL(burnedUrl).hostname.split('.')[0];
     const timestamp = Math.floor(Date.now() / 1000);

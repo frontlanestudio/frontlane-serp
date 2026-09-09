@@ -24,6 +24,16 @@ indent_style = unset
 indent_size = unset
 trim_trailing_whitespace = false
 
+[src/flareprox/edge_worker_script.rs]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = false
+
+[src/flareprox/worker_script.rs]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = false
+
 [examples/**.{js,mjs,ts}]
 indent_style = space
 indent_size = 2
