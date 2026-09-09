@@ -1,14 +1,54 @@
 .git
 .gitignore
+.gitattributes
+.github
+.dockerignore
+.editorconfig
 
-.release/
-docs/*.md
+# Build artifacts
+target/
+*.log
+logs.txt
+
+# Environment & local credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Test fixtures, integration tests & scripts (not needed for release binary build)
+tests/
+scripts/
+examples/
+
+# Scratch, benchmark & competitor data dumps
+scratch*
+calljacob*
+audit_sample*
+ca_competitor*
+ca_competitors*
+ca_gap*
+ca_untapped*
+competitor*
+master_competitor*
+tracked_keywords*
+test*.txt
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.csv
+*.tsv
+*.parquet
+data/
+output/
+reports/
+
+# Documentation & IDE
+docs/
 *.md
-testdata/
-
-openserp
-openserp.exe
-bin/
-dist/
-*.tgz
-*.tar
+!README.md
+.idea/
+.vscode/
