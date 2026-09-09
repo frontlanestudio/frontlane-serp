@@ -85,21 +85,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.insecure,
         config.app.timeout,
     )?;
-    let scraping_http_client = http_client
-        .clone()
-        .with_impersonation(
-            config.app.browser_impersonation,
-            config.proxies.global.as_deref(),
-            config.server.insecure,
-            config.app.timeout,
-        )
-        .unwrap_or_else(|e| {
-            tracing::warn!(
-                error = %e,
-                "failed to initialize browser impersonation client, falling back to plain HTTP client"
-            );
-            http_client.clone()
-        });
+    let scraping_http_client = http_client.for_scraping(
+        config.app.browser_impersonation,
+        config.proxies.global.as_deref(),
+        config.server.insecure,
+        config.app.timeout,
+    );
 
     let engines = build_all_engines(&scraping_http_client);
 

@@ -9,25 +9,7 @@ fn sample_envelope() -> Envelope {
         text: "rust programming".to_string(),
         lang_code: "en".to_string(),
         region: "us".to_string(),
-        date_interval: String::new(),
-        filetype: String::new(),
-        site: String::new(),
-        limit: 10,
-        start: 0,
-        filter: true,
-        features: true,
-        extract: false,
-        extract_top: 0,
-        extract_mode: "auto".to_string(),
-        extract_min_runes: 0,
-        proxy_url: None,
-        proxy_country: None,
-        proxy_class: None,
-        proxy_provider: None,
-        proxy_session_id: None,
-        proxy_override: None,
-        insecure: true,
-        guard_private_networks: false,
+        ..Default::default()
     };
 
     let mut env = Envelope::new(

@@ -152,6 +152,26 @@ impl HttpClient {
         Ok(self)
     }
 
+    /// Build a scraping client with optional browser impersonation, falling back
+    /// to a plain client if impersonation fails to initialize.
+    pub fn for_scraping(
+        &self,
+        enabled: bool,
+        proxy_url: Option<&str>,
+        insecure: bool,
+        timeout_secs: u64,
+    ) -> Self {
+        self.clone()
+            .with_impersonation(enabled, proxy_url, insecure, timeout_secs)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "failed to initialize browser impersonation client, falling back to plain HTTP client"
+                );
+                self.clone()
+            })
+    }
+
     pub fn is_impersonating(&self) -> bool {
         self.impersonating.is_some()
     }

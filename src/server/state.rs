@@ -72,21 +72,12 @@ impl AppState {
         // transport when enabled. Falls back to the plain client on build
         // failure rather than failing server startup over an optional
         // hardening feature.
-        let scraping_http_client = http_client
-            .clone()
-            .with_impersonation(
-                config.app.browser_impersonation,
-                config.proxies.global.as_deref(),
-                config.server.insecure,
-                config.app.timeout,
-            )
-            .unwrap_or_else(|e| {
-                tracing::warn!(
-                    error = %e,
-                    "failed to initialize browser impersonation client, falling back to plain HTTP client"
-                );
-                http_client.clone()
-            });
+        let scraping_http_client = http_client.for_scraping(
+            config.app.browser_impersonation,
+            config.proxies.global.as_deref(),
+            config.server.insecure,
+            config.app.timeout,
+        );
 
         let extractor = Arc::new(Extractor::with_solver_and_lanes(
             scraping_http_client.clone(),

@@ -23,6 +23,19 @@ pub fn normalize_domain_or_url(input: &str) -> (String, String) {
     }
 }
 
+fn is_subdomain_match(cand_host: &str, target_host: &str) -> bool {
+    cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host))
+}
+
+fn is_path_prefix_match(cand_path: &str, target_path: &str) -> bool {
+    if target_path == "/" {
+        true
+    } else {
+        let prefix = target_path.trim_end_matches('/');
+        cand_path == prefix || cand_path.starts_with(&format!("{}/", prefix))
+    }
+}
+
 pub fn matches_target(candidate_url: &str, target: &str, mode: DomainMatchMode) -> bool {
     if candidate_url.is_empty() || target.is_empty() {
         return false;
@@ -39,38 +52,14 @@ pub fn matches_target(candidate_url: &str, target: &str, mode: DomainMatchMode) 
                 cand_host == target_host && cand_path == target_path
             }
         }
-        DomainMatchMode::Subdomain => {
-            let host_matches =
-                cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host));
-            if !host_matches {
-                return false;
-            }
-            if target_path == "/" {
-                true
-            } else {
-                cand_path == target_path || cand_path.starts_with(&format!("{}/", target_path))
-            }
+        DomainMatchMode::Subdomain | DomainMatchMode::Directory => {
+            is_subdomain_match(&cand_host, &target_host)
+                && is_path_prefix_match(&cand_path, &target_path)
         }
         DomainMatchMode::Wildcard => {
             let clean_target = target.trim().to_lowercase();
-            if let Some(suffix) = clean_target.strip_prefix("*.") {
-                cand_host == suffix || cand_host.ends_with(&format!(".{}", suffix))
-            } else {
-                cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host))
-            }
-        }
-        DomainMatchMode::Directory => {
-            let host_matches =
-                cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host));
-            if !host_matches {
-                return false;
-            }
-            if target_path == "/" {
-                true
-            } else {
-                let prefix = target_path.trim_end_matches('/');
-                cand_path == prefix || cand_path.starts_with(&format!("{}/", prefix))
-            }
+            let suffix = clean_target.strip_prefix("*.").unwrap_or(&target_host);
+            is_subdomain_match(&cand_host, suffix)
         }
     }
 }

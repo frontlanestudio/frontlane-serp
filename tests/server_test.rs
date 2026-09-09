@@ -8,12 +8,16 @@ use frontlane_serp::core::http_client::HttpClient;
 use frontlane_serp::server::create_router;
 use frontlane_serp::server::state::AppState;
 
-#[tokio::test]
-async fn test_server_routes_health_and_root() {
+fn create_test_app() -> axum::Router {
     let config = AppConfig::default();
     let http_client = HttpClient::new(None, true, 10).expect("http client");
     let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    create_router(state)
+}
+
+#[tokio::test]
+async fn test_server_routes_health_and_root() {
+    let app = create_test_app();
 
     // Test GET /
     let response = app
@@ -47,10 +51,7 @@ async fn test_server_routes_health_and_root() {
 
 #[tokio::test]
 async fn test_server_parse_google_endpoint() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     let sample_html = std::fs::read_to_string("tests/fixtures/google/search_results.html")
         .expect("read google fixture");
@@ -76,10 +77,7 @@ async fn test_server_parse_google_endpoint() {
 
 #[tokio::test]
 async fn test_server_rank_validation() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     // Missing target/q should return 400
     let response = app
@@ -97,10 +95,7 @@ async fn test_server_rank_validation() {
 
 #[tokio::test]
 async fn test_server_suggest_validation() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     // Missing q parameter should return 400
     let response = app
@@ -118,10 +113,7 @@ async fn test_server_suggest_validation() {
 
 #[tokio::test]
 async fn test_server_jobs_routes() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     // Non-existent job returns 404
     let response = app
@@ -155,10 +147,7 @@ async fn test_server_jobs_routes() {
 
 #[tokio::test]
 async fn test_server_stats_routes() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     // 1. Test /stats
     let response = app
@@ -230,10 +219,7 @@ async fn test_server_stats_routes() {
 
 #[tokio::test]
 async fn test_server_crawl_endpoint() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     let req_body = serde_json::json!({
         "start_url": "http://127.0.0.1:8080/internal",
@@ -262,10 +248,7 @@ async fn test_server_crawl_endpoint() {
 
 #[tokio::test]
 async fn test_batch_rank_rejects_ssrf_webhook() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     let req_body = serde_json::json!({
         "targets": [
@@ -340,10 +323,7 @@ async fn test_csv_formatting_envelope() {
 
 #[tokio::test]
 async fn test_server_docs_and_openapi_endpoints() {
-    let config = AppConfig::default();
-    let http_client = HttpClient::new(None, true, 10).expect("http client");
-    let state = AppState::new(config, vec![], http_client);
-    let app = create_router(state);
+    let app = create_test_app();
 
     // 1. Test GET /docs returns Swagger UI
     let response = app
