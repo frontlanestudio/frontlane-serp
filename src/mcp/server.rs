@@ -132,14 +132,19 @@ pub fn get_available_tools() -> Vec<McpTool> {
     ]
 }
 
+/// Context containing all service dependencies for MCP tool execution.
+pub struct McpServerContext {
+    pub engines: HashMap<String, Arc<dyn SearchEngine>>,
+    pub mega: Arc<MegaSearcher>,
+    pub extractor: Arc<Extractor>,
+    pub suggest: SuggestClient,
+    pub crawler: Arc<crate::crawl::Crawler>,
+}
+
 pub async fn handle_tool_call(
     name: &str,
     args: serde_json::Value,
-    engines: &HashMap<String, Arc<dyn SearchEngine>>,
-    mega: &Arc<MegaSearcher>,
-    extractor: &Arc<Extractor>,
-    suggest: &SuggestClient,
-    crawler: &Arc<crate::crawl::Crawler>,
+    ctx: &McpServerContext,
 ) -> McpToolCallResult {
     match name {
         "serp_search" => {
@@ -166,7 +171,7 @@ pub async fn handle_tool_call(
                 other => other,
             };
 
-            let engine = match engines.get(norm_engine) {
+            let engine = match ctx.engines.get(norm_engine) {
                 Some(e) => e,
                 None => {
                     return McpToolCallResult {
@@ -254,7 +259,7 @@ pub async fn handle_tool_call(
                 _ => DomainMatchMode::Subdomain,
             };
 
-            let engine = match engines.get(&engine_name) {
+            let engine = match ctx.engines.get(&engine_name) {
                 Some(e) => e.clone(),
                 None => {
                     return McpToolCallResult::error(format!("Unknown engine: {}", engine_name))
@@ -288,7 +293,7 @@ pub async fn handle_tool_call(
             let region = args.get("region").and_then(|v| v.as_str()).unwrap_or("us");
             let lang = args.get("lang").and_then(|v| v.as_str()).unwrap_or("en");
 
-            match suggest.suggest(engine_name, query_text, lang, region).await {
+            match ctx.suggest.suggest(engine_name, query_text, lang, region).await {
                 Ok(resp) => McpToolCallResult::success_json(&resp),
                 Err(e) => McpToolCallResult::error(format!("Suggest error: {}", e)),
             }
@@ -300,7 +305,7 @@ pub async fn handle_tool_call(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
 
-            match extractor.extract(target_url, llms_txt).await {
+            match ctx.extractor.extract(target_url, llms_txt).await {
                 Ok(content) => McpToolCallResult::success_json(&content),
                 Err(e) => McpToolCallResult::error(format!("Extraction error: {}", e)),
             }
@@ -351,7 +356,7 @@ pub async fn handle_tool_call(
                 guard_private_networks: false,
             };
 
-            match mega.search(&q, &engines_list, mode).await {
+            match ctx.mega.search(&q, &engines_list, mode).await {
                 Ok(env) => McpToolCallResult::success_json(&env.results),
                 Err(e) => McpToolCallResult::error(format!("Mega search error: {}", e)),
             }
@@ -383,7 +388,7 @@ pub async fn handle_tool_call(
                 extract_content: true,
             };
 
-            match crawler.crawl(options).await {
+            match ctx.crawler.crawl(options).await {
                 Ok(res) => McpToolCallResult::success_json(&res),
                 Err(e) => McpToolCallResult::error(format!("Crawl error: {}", e)),
             }
@@ -394,7 +399,7 @@ pub async fn handle_tool_call(
             let max_pages = args.get("max_pages").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
             match crate::extract::scan_contacts(
-                crawler.http_client(),
+                ctx.crawler.http_client(),
                 target_url,
                 crawl,
                 max_pages,
@@ -423,6 +428,13 @@ pub async fn run_stdio_mcp_server(
     suggest: SuggestClient,
     crawler: Arc<crate::crawl::Crawler>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = McpServerContext {
+        engines,
+        mega,
+        extractor,
+        suggest,
+        crawler,
+    };
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
     let mut stdout = tokio::io::stdout();
@@ -481,10 +493,7 @@ pub async fn run_stdio_mcp_server(
                 let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-                let call_res = handle_tool_call(
-                    tool_name, tool_args, &engines, &mega, &extractor, &suggest, &crawler,
-                )
-                .await;
+                let call_res = handle_tool_call(tool_name, tool_args, &ctx).await;
 
                 let resp = JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),

@@ -6,4 +6,4 @@ pub use installer::{install_mcp, status_mcp, uninstall_mcp};
 pub use protocol::{
     JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpTool, McpToolCallContent, McpToolCallResult,
 };
-pub use server::{get_available_tools, handle_tool_call, run_stdio_mcp_server};
+pub use server::{get_available_tools, handle_tool_call, run_stdio_mcp_server, McpServerContext};

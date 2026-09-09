@@ -22,56 +22,22 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
 fn is_public_ipv4(ip: Ipv4Addr) -> bool {
     let octets = ip.octets();
 
-    // Loopback (127.0.0.0/8)
-    if ip.is_loopback() {
-        return false;
-    }
-
-    // Unspecified (0.0.0.0)
-    if ip.is_unspecified() {
-        return false;
-    }
-
-    // Broadcast (255.255.255.255)
-    if ip.is_broadcast() {
-        return false;
-    }
-
-    // Multicast (224.0.0.0/4)
-    if ip.is_multicast() {
-        return false;
-    }
-
-    // Link-local (169.254.0.0/16)
-    if ip.is_link_local() {
-        return false;
-    }
-
-    // Private RFC 1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-    if ip.is_private() {
-        return false;
-    }
-
-    // Carrier-grade NAT RFC 6598 (100.64.0.0/10)
-    // Range: 100.64.0.0 to 100.127.255.255
-    if octets[0] == 100 && (octets[1] & 0xC0) == 64 {
-        return false;
-    }
-
-    // Documentation RFC 5737: 192.0.2.0/24 (TEST-NET-1), 198.51.100.0/24 (TEST-NET-2), 203.0.113.0/24 (TEST-NET-3)
-    if (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+    let is_non_public = ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_link_local()
+        || ip.is_private()
+        // Carrier-grade NAT RFC 6598 (100.64.0.0/10)
+        || (octets[0] == 100 && (octets[1] & 0xC0) == 64)
+        // Documentation RFC 5737: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
         || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
         || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
-    {
-        return false;
-    }
+        // Benchmarking RFC 2544 (198.18.0.0/15)
+        || (octets[0] == 198 && (octets[1] & 0xFE) == 18);
 
-    // Benchmarking RFC 2544 (198.18.0.0/15)
-    if octets[0] == 198 && (octets[1] & 0xFE) == 18 {
-        return false;
-    }
-
-    true
+    !is_non_public
 }
 
 fn is_public_ipv6(ip: Ipv6Addr) -> bool {
