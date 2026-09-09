@@ -6,10 +6,8 @@ Facebook, TikTok, YouTube, and X / Twitter.
 """
 
 import sys
-import os
 import time
 import argparse
-import datetime
 import sqlite3
 from pathlib import Path
 
@@ -89,7 +87,7 @@ def run_linkedin(candidates, limit=50, max_posts=25, delay=0.5):
                 success += 1
                 print(f"  [✓] Company ID: {res['company_id']} | Posts: {res['new_posts']}", flush=True)
             else:
-                print(f"  [-] Company page not resolved.", flush=True)
+                print("  [-] Company page not resolved.", flush=True)
         except Exception as e:
             print(f"  [!] Failed: {e}", flush=True)
         time.sleep(delay)
@@ -149,7 +147,7 @@ def run_twitter(candidates, limit=50, delay=0.5):
                 success += 1
                 print(f"  [✓] Name: {res['display_name']}", flush=True)
             else:
-                print(f"  [-] Profile not resolved.", flush=True)
+                print("  [-] Profile not resolved.", flush=True)
         except Exception as e:
             print(f"  [!] Failed: {e}", flush=True)
         time.sleep(delay)

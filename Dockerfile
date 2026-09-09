@@ -9,7 +9,7 @@ WORKDIR /build
 # bindgen's FFI binding generation, and git since boring-sys fetches its
 # BoringSSL source as a submodule-style checkout.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends cmake perl pkg-config clang libclang-dev git \
+  && apt-get install -y --no-install-recommends clang cmake git libclang-dev perl pkg-config \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy source code and build release binary
@@ -45,7 +45,7 @@ USER serp
 EXPOSE 7000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:7000/health" || exit 1
+  CMD ["curl", "-fsS", "http://127.0.0.1:7000/health"]
 
 ENTRYPOINT ["frontlane-serp"]
 CMD ["serve"]

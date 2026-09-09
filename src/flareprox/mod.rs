@@ -44,32 +44,35 @@ impl Default for FlareProxConfig {
     }
 }
 
+fn extract_oauth_token_from_toml(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("oauth_token") {
+            continue;
+        }
+        if let Some(val) = trimmed.split('=').nth(1) {
+            let clean = val.trim().trim_matches('"').trim_matches('\'').trim();
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Tries to automatically detect the Cloudflare OAuth token from local Wrangler config
 pub fn detect_wrangler_token() -> Option<String> {
-    let mut candidate_paths = Vec::new();
-    if let Ok(home) = std::env::var("HOME") {
-        candidate_paths.push(format!(
-            "{}/Library/Preferences/.wrangler/config/default.toml",
-            home
-        ));
-        candidate_paths.push(format!("{}/.wrangler/config/default.toml", home));
-        candidate_paths.push(format!("{}/.config/.wrangler/config/default.toml", home));
-    }
+    let home = std::env::var("HOME").ok()?;
+    let candidate_paths = [
+        format!("{}/Library/Preferences/.wrangler/config/default.toml", home),
+        format!("{}/.wrangler/config/default.toml", home),
+        format!("{}/.config/.wrangler/config/default.toml", home),
+    ];
     for path_str in candidate_paths {
         let p = std::path::Path::new(&path_str);
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("oauth_token") {
-                        if let Some(val) = trimmed.split('=').nth(1) {
-                            let clean = val.trim().trim_matches('"').trim_matches('\'').trim();
-                            if !clean.is_empty() {
-                                return Some(clean.to_string());
-                            }
-                        }
-                    }
-                }
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if let Some(tok) = extract_oauth_token_from_toml(&content) {
+                return Some(tok);
             }
         }
     }
