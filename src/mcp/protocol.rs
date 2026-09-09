@@ -48,3 +48,26 @@ pub struct McpToolCallResult {
     #[serde(default)]
     pub is_error: bool,
 }
+
+impl McpToolCallResult {
+    pub fn success_json<T: Serialize>(value: &T) -> Self {
+        let text = serde_json::to_string_pretty(value).unwrap_or_default();
+        Self {
+            content: vec![McpToolCallContent {
+                r#type: "text".to_string(),
+                text,
+            }],
+            is_error: false,
+        }
+    }
+
+    pub fn error(message: impl std::fmt::Display) -> Self {
+        Self {
+            content: vec![McpToolCallContent {
+                r#type: "text".to_string(),
+                text: message.to_string(),
+            }],
+            is_error: true,
+        }
+    }
+}

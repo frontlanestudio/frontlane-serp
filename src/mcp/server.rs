@@ -210,22 +210,9 @@ pub async fn handle_tool_call(
                     for r in raw {
                         items.push(enrich_result(r, norm_engine, 0));
                     }
-                    let json_out = serde_json::to_string_pretty(&items).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
+                    McpToolCallResult::success_json(&items)
                 }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Search error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Err(e) => McpToolCallResult::error(format!("Search error: {}", e)),
             }
         }
         "check_rank" => {
@@ -270,13 +257,7 @@ pub async fn handle_tool_call(
             let engine = match engines.get(&engine_name) {
                 Some(e) => e.clone(),
                 None => {
-                    return McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: format!("Unknown engine: {}", engine_name),
-                        }],
-                        is_error: true,
-                    };
+                    return McpToolCallResult::error(format!("Unknown engine: {}", engine_name))
                 }
             };
 
@@ -294,23 +275,8 @@ pub async fn handle_tool_call(
             };
 
             match probe_engine_rank(engine, &req).await {
-                Ok(resp) => {
-                    let json_out = serde_json::to_string_pretty(&resp).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Rank probe error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(resp) => McpToolCallResult::success_json(&resp),
+                Err(e) => McpToolCallResult::error(format!("Rank probe error: {}", e)),
             }
         }
         "suggest_keywords" => {
@@ -323,23 +289,8 @@ pub async fn handle_tool_call(
             let lang = args.get("lang").and_then(|v| v.as_str()).unwrap_or("en");
 
             match suggest.suggest(engine_name, query_text, lang, region).await {
-                Ok(resp) => {
-                    let json_out = serde_json::to_string_pretty(&resp).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Suggest error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(resp) => McpToolCallResult::success_json(&resp),
+                Err(e) => McpToolCallResult::error(format!("Suggest error: {}", e)),
             }
         }
         "extract_content" => {
@@ -350,23 +301,8 @@ pub async fn handle_tool_call(
                 .unwrap_or(true);
 
             match extractor.extract(target_url, llms_txt).await {
-                Ok(content) => {
-                    let json_out = serde_json::to_string_pretty(&content).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Extraction error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(content) => McpToolCallResult::success_json(&content),
+                Err(e) => McpToolCallResult::error(format!("Extraction error: {}", e)),
             }
         }
         "mega_search" => {
@@ -416,23 +352,8 @@ pub async fn handle_tool_call(
             };
 
             match mega.search(&q, &engines_list, mode).await {
-                Ok(env) => {
-                    let json_out = serde_json::to_string_pretty(&env.results).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Mega search error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(env) => McpToolCallResult::success_json(&env.results),
+                Err(e) => McpToolCallResult::error(format!("Mega search error: {}", e)),
             }
         }
         "crawl_site" => {
@@ -463,23 +384,8 @@ pub async fn handle_tool_call(
             };
 
             match crawler.crawl(options).await {
-                Ok(res) => {
-                    let json_out = serde_json::to_string_pretty(&res).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Crawl error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(res) => McpToolCallResult::success_json(&res),
+                Err(e) => McpToolCallResult::error(format!("Crawl error: {}", e)),
             }
         }
         "serp_extract_contacts" => {
@@ -496,23 +402,8 @@ pub async fn handle_tool_call(
             )
             .await
             {
-                Ok(contacts) => {
-                    let json_out = serde_json::to_string_pretty(&contacts).unwrap_or_default();
-                    McpToolCallResult {
-                        content: vec![McpToolCallContent {
-                            r#type: "text".to_string(),
-                            text: json_out,
-                        }],
-                        is_error: false,
-                    }
-                }
-                Err(e) => McpToolCallResult {
-                    content: vec![McpToolCallContent {
-                        r#type: "text".to_string(),
-                        text: format!("Contacts extraction error: {}", e),
-                    }],
-                    is_error: true,
-                },
+                Ok(contacts) => McpToolCallResult::success_json(&contacts),
+                Err(e) => McpToolCallResult::error(format!("Contacts extraction error: {}", e)),
             }
         }
         _ => McpToolCallResult {

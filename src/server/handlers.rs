@@ -223,74 +223,44 @@ fn determine_format(params_fmt: Option<&str>, accept_hdr: Option<&str>) -> Outpu
     OutputFormat::Json
 }
 
-fn format_response(env: &Envelope, format: OutputFormat) -> Response {
-    match format {
-        OutputFormat::Json => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-            serde_json::to_string(env).unwrap_or_default(),
-        )
-            .into_response(),
-        OutputFormat::Csv => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-            render_envelope(env, OutputFormat::Csv),
-        )
-            .into_response(),
+fn format_payload_response(
+    format: OutputFormat,
+    json_body: impl FnOnce() -> String,
+    rendered_body: impl FnOnce(OutputFormat) -> String,
+) -> Response {
+    let (content_type, body) = match format {
+        OutputFormat::Json => ("application/json; charset=utf-8", json_body()),
+        OutputFormat::Csv => ("text/csv; charset=utf-8", rendered_body(OutputFormat::Csv)),
         OutputFormat::Markdown => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-            render_envelope(env, OutputFormat::Markdown),
-        )
-            .into_response(),
+            "text/markdown; charset=utf-8",
+            rendered_body(OutputFormat::Markdown),
+        ),
         OutputFormat::Text => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            render_envelope(env, OutputFormat::Text),
-        )
-            .into_response(),
+            "text/plain; charset=utf-8",
+            rendered_body(OutputFormat::Text),
+        ),
         OutputFormat::Ndjson => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")],
-            render_envelope(env, OutputFormat::Ndjson),
-        )
-            .into_response(),
-    }
+            "application/x-ndjson; charset=utf-8",
+            rendered_body(OutputFormat::Ndjson),
+        ),
+    };
+    (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], body).into_response()
+}
+
+fn format_response(env: &Envelope, format: OutputFormat) -> Response {
+    format_payload_response(
+        format,
+        || serde_json::to_string(env).unwrap_or_default(),
+        |fmt| render_envelope(env, fmt),
+    )
 }
 
 fn format_image_response(env: &ImageEnvelope, format: OutputFormat) -> Response {
-    match format {
-        OutputFormat::Json => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-            serde_json::to_string(env).unwrap_or_default(),
-        )
-            .into_response(),
-        OutputFormat::Csv => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-            render_image_envelope(env, OutputFormat::Csv),
-        )
-            .into_response(),
-        OutputFormat::Markdown => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-            render_image_envelope(env, OutputFormat::Markdown),
-        )
-            .into_response(),
-        OutputFormat::Text => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            render_image_envelope(env, OutputFormat::Text),
-        )
-            .into_response(),
-        OutputFormat::Ndjson => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")],
-            render_image_envelope(env, OutputFormat::Ndjson),
-        )
-            .into_response(),
-    }
+    format_payload_response(
+        format,
+        || serde_json::to_string(env).unwrap_or_default(),
+        |fmt| render_image_envelope(env, fmt),
+    )
 }
 
 fn error_response(err: SerpError) -> Response {
@@ -1042,6 +1012,40 @@ pub async fn crawl_post_handler(
     }
 }
 
+fn format_contacts_response(
+    contacts: &crate::extract::contacts::ContactInfo,
+    format_param: Option<&str>,
+    accept_header: Option<&str>,
+) -> Response {
+    let format = determine_format(format_param, accept_header);
+    match format {
+        OutputFormat::Markdown => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+            contacts.to_markdown(),
+        )
+            .into_response(),
+        OutputFormat::Csv => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            contacts.to_csv(),
+        )
+            .into_response(),
+        OutputFormat::Text => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            contacts.to_console_text(),
+        )
+            .into_response(),
+        _ => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string_pretty(contacts).unwrap_or_default(),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn extract_contacts_get_handler(
     headers: HeaderMap,
     AxumQuery(params): AxumQuery<ExtractContactsQueryParams>,
@@ -1067,33 +1071,7 @@ pub async fn extract_contacts_get_handler(
     {
         Ok(contacts) => {
             let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
-            let format = determine_format(params.format.as_deref(), accept_header);
-            match format {
-                OutputFormat::Markdown => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-                    contacts.to_markdown(),
-                )
-                    .into_response(),
-                OutputFormat::Csv => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-                    contacts.to_csv(),
-                )
-                    .into_response(),
-                OutputFormat::Text => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-                    contacts.to_console_text(),
-                )
-                    .into_response(),
-                _ => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-                    serde_json::to_string_pretty(&contacts).unwrap_or_default(),
-                )
-                    .into_response(),
-            }
+            format_contacts_response(&contacts, params.format.as_deref(), accept_header)
         }
         Err(e) => error_response(e),
     }
@@ -1122,43 +1100,16 @@ pub async fn extract_contacts_post_handler(
     {
         Ok(contacts) => {
             let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
-            let format = determine_format(payload.format.as_deref(), accept_header);
-            match format {
-                OutputFormat::Markdown => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-                    contacts.to_markdown(),
-                )
-                    .into_response(),
-                OutputFormat::Csv => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-                    contacts.to_csv(),
-                )
-                    .into_response(),
-                OutputFormat::Text => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-                    contacts.to_console_text(),
-                )
-                    .into_response(),
-                _ => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-                    serde_json::to_string_pretty(&contacts).unwrap_or_default(),
-                )
-                    .into_response(),
-            }
+            format_contacts_response(&contacts, payload.format.as_deref(), accept_header)
         }
         Err(e) => error_response(e),
     }
 }
 
-pub async fn parse_google_handler(body: String) -> Response {
-    let parsed = match crate::engines::google::parser::parse_html(&body, 0) {
-        Ok(res) => res,
-        Err(e) => return error_response(e),
-    };
+fn build_parsed_envelope(
+    engine_name: &'static str,
+    parsed: Vec<crate::core::types::SearchResult>,
+) -> Envelope {
     let mut env = Envelope::new(
         &Query {
             text: String::new(),
@@ -1186,62 +1137,31 @@ pub async fn parse_google_handler(body: String) -> Response {
         },
         uuid::Uuid::now_v7().to_string(),
         Utc::now(),
-        vec!["google".to_string()],
+        vec![engine_name.to_string()],
     );
 
     for raw in parsed {
         for f in &raw.features {
             env.serp_features.push(f.clone());
         }
-        env.results.push(enrich_result(raw, "google", 0));
+        env.results.push(enrich_result(raw, engine_name, 0));
     }
 
-    format_response(&env, OutputFormat::Json)
+    env
+}
+
+pub async fn parse_google_handler(body: String) -> Response {
+    match crate::engines::google::parser::parse_html(&body, 0) {
+        Ok(res) => format_response(&build_parsed_envelope("google", res), OutputFormat::Json),
+        Err(e) => error_response(e),
+    }
 }
 
 pub async fn parse_bing_handler(body: String) -> Response {
-    let parsed = match crate::engines::bing::parser::parse_html(&body, 0) {
-        Ok(res) => res,
-        Err(e) => return error_response(e),
-    };
-    let mut env = Envelope::new(
-        &Query {
-            text: String::new(),
-            lang_code: String::new(),
-            region: String::new(),
-            date_interval: String::new(),
-            filetype: String::new(),
-            site: String::new(),
-            limit: 10,
-            start: 0,
-            filter: false,
-            features: true,
-            extract: false,
-            extract_top: 1,
-            extract_mode: "auto".to_string(),
-            extract_min_runes: 0,
-            proxy_url: None,
-            proxy_country: None,
-            proxy_class: None,
-            proxy_provider: None,
-            proxy_session_id: None,
-            proxy_override: None,
-            insecure: true,
-            guard_private_networks: false,
-        },
-        uuid::Uuid::now_v7().to_string(),
-        Utc::now(),
-        vec!["bing".to_string()],
-    );
-
-    for raw in parsed {
-        for f in &raw.features {
-            env.serp_features.push(f.clone());
-        }
-        env.results.push(enrich_result(raw, "bing", 0));
+    match crate::engines::bing::parser::parse_html(&body, 0) {
+        Ok(res) => format_response(&build_parsed_envelope("bing", res), OutputFormat::Json),
+        Err(e) => error_response(e),
     }
-
-    format_response(&env, OutputFormat::Json)
 }
 
 // Serper search handler

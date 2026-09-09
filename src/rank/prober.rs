@@ -41,6 +41,89 @@ pub fn calculate_pages_to_probe(
     }
 }
 
+fn process_page_items(
+    items: Vec<crate::core::types::ResultItem>,
+    req: &RankRequest,
+    ranked_hit: &mut Option<crate::core::types::ResultItem>,
+    serp_results: &mut Vec<crate::rank::types::SerpRankResultItem>,
+) -> bool {
+    let mut target_found = false;
+    for item in items {
+        let is_target = matches_target(&item.url, &req.target, req.r#match);
+        let rank = if item.rank > 0 {
+            item.rank
+        } else if let Some(ref pos) = item.position {
+            pos.absolute
+        } else {
+            serp_results.len() + 1
+        };
+
+        if is_target && ranked_hit.is_none() {
+            *ranked_hit = Some(item.clone());
+            target_found = true;
+        }
+
+        let is_dir = crate::core::domain::is_directory_domain(&item.domain)
+            || item.domain_info.as_ref().map(|d| d.category.as_str()) == Some("directory");
+        let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
+
+        serp_results.push(crate::rank::types::SerpRankResultItem {
+            rank,
+            url: item.url,
+            title: item.title,
+            snippet: if item.snippet.is_empty() {
+                None
+            } else {
+                Some(item.snippet)
+            },
+            domain: if item.domain.is_empty() {
+                None
+            } else {
+                Some(item.domain)
+            },
+            is_target,
+            is_directory: is_dir,
+            domain_category,
+        });
+    }
+    target_found
+}
+
+fn feature_has_target_link(feature: &SerpFeature, req: &RankRequest) -> bool {
+    feature
+        .links
+        .iter()
+        .filter_map(|l| l.url.as_deref())
+        .any(|u| matches_target(u, &req.target, req.r#match))
+}
+
+fn extract_feature_citations(features: &[SerpFeature], req: &RankRequest) -> Vec<String> {
+    let mut feature_citations = Vec::new();
+    for feature in features {
+        match feature.feature_type {
+            ResultType::AnswerBox if feature_has_target_link(feature, req) => {
+                feature_citations.push("AnswerBox".to_string());
+            }
+            ResultType::KnowledgePanel if feature_has_target_link(feature, req) => {
+                feature_citations.push("KnowledgePanel".to_string());
+            }
+            ResultType::PeopleAlsoAsk | ResultType::RelatedQuestions => {
+                let has_match = feature
+                    .items
+                    .iter()
+                    .filter_map(|it| it.link.as_deref())
+                    .any(|link| matches_target(link, &req.target, req.r#match));
+                if has_match {
+                    feature_citations.push("PeopleAlsoAsk".to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    feature_citations.dedup();
+    feature_citations
+}
+
 pub async fn probe_engine_rank(
     engine: Arc<dyn SearchEngine>,
     req: &RankRequest,
@@ -49,9 +132,7 @@ pub async fn probe_engine_rank(
     let initial_pages = calculate_pages_to_probe(req.strategy, req.last_rank, req.pagination_limit);
     let mut pages_scraped = Vec::new();
     let mut all_serp_features = Vec::new();
-    let mut feature_citations = Vec::new();
     let mut serp_results = Vec::new();
-
     let mut ranked_hit = None;
 
     // Helper to probe a single page
@@ -113,47 +194,7 @@ pub async fn probe_engine_rank(
         let (items, features) = probe_single_page(&engine, req, *page).await?;
         all_serp_features.extend(features);
 
-        let mut target_found_on_page = false;
-        for item in items {
-            let is_target = matches_target(&item.url, &req.target, req.r#match);
-            let rank = if item.rank > 0 {
-                item.rank
-            } else if let Some(ref pos) = item.position {
-                pos.absolute
-            } else {
-                serp_results.len() + 1
-            };
-
-            if is_target && ranked_hit.is_none() {
-                ranked_hit = Some(item.clone());
-                target_found_on_page = true;
-            }
-
-            let is_dir = crate::core::domain::is_directory_domain(&item.domain)
-                || item.domain_info.as_ref().map(|d| d.category.as_str()) == Some("directory");
-            let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
-
-            serp_results.push(crate::rank::types::SerpRankResultItem {
-                rank,
-                url: item.url,
-                title: item.title,
-                snippet: if item.snippet.is_empty() {
-                    None
-                } else {
-                    Some(item.snippet)
-                },
-                domain: if item.domain.is_empty() {
-                    None
-                } else {
-                    Some(item.domain)
-                },
-                is_target,
-                is_directory: is_dir,
-                domain_category,
-            });
-        }
-
-        if target_found_on_page {
+        if process_page_items(items, req, &mut ranked_hit, &mut serp_results) {
             break;
         }
     }
@@ -167,89 +208,14 @@ pub async fn probe_engine_rank(
                 let (items, features) = probe_single_page(&engine, req, page).await?;
                 all_serp_features.extend(features);
 
-                let mut target_found_on_page = false;
-                for item in items {
-                    let is_target = matches_target(&item.url, &req.target, req.r#match);
-                    let rank = if item.rank > 0 {
-                        item.rank
-                    } else if let Some(ref pos) = item.position {
-                        pos.absolute
-                    } else {
-                        serp_results.len() + 1
-                    };
-
-                    if is_target && ranked_hit.is_none() {
-                        ranked_hit = Some(item.clone());
-                        target_found_on_page = true;
-                    }
-
-                    let is_dir = crate::core::domain::is_directory_domain(&item.domain)
-                        || item.domain_info.as_ref().map(|d| d.category.as_str())
-                            == Some("directory");
-                    let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
-
-                    serp_results.push(crate::rank::types::SerpRankResultItem {
-                        rank,
-                        url: item.url,
-                        title: item.title,
-                        snippet: if item.snippet.is_empty() {
-                            None
-                        } else {
-                            Some(item.snippet)
-                        },
-                        domain: if item.domain.is_empty() {
-                            None
-                        } else {
-                            Some(item.domain)
-                        },
-                        is_target,
-                        is_directory: is_dir,
-                        domain_category,
-                    });
-                }
-
-                if target_found_on_page {
+                if process_page_items(items, req, &mut ranked_hit, &mut serp_results) {
                     break;
                 }
             }
         }
     }
 
-    // Inspect SERP features for target citations
-    for feature in &all_serp_features {
-        match feature.feature_type {
-            ResultType::AnswerBox => {
-                for link in &feature.links {
-                    if let Some(ref u) = link.url {
-                        if matches_target(u, &req.target, req.r#match) {
-                            feature_citations.push("AnswerBox".to_string());
-                        }
-                    }
-                }
-            }
-            ResultType::KnowledgePanel => {
-                for link in &feature.links {
-                    if let Some(ref u) = link.url {
-                        if matches_target(u, &req.target, req.r#match) {
-                            feature_citations.push("KnowledgePanel".to_string());
-                        }
-                    }
-                }
-            }
-            ResultType::PeopleAlsoAsk | ResultType::RelatedQuestions => {
-                for item in &feature.items {
-                    if let Some(ref link) = item.link {
-                        if matches_target(link, &req.target, req.r#match) {
-                            feature_citations.push("PeopleAlsoAsk".to_string());
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    feature_citations.dedup();
+    let feature_citations = extract_feature_citations(&all_serp_features, req);
 
     let mut directory_count = 0;
     let mut ranking_directories = Vec::new();

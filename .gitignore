@@ -60,6 +60,8 @@ temp/
 logs.txt
 scratch*
 audit_sample*
+.qlty/*
+!.qlty/qlty.toml
 
 # Local Scrapes, Competitor Data & Audit Dumps
 calljacob*
