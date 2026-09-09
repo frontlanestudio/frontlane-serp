@@ -8,6 +8,7 @@ pub mod error;
 pub mod feature_selectors;
 pub mod format;
 pub mod http_client;
+pub mod impersonate;
 pub mod locale;
 pub mod network_guard;
 pub mod proxy;
@@ -21,13 +22,14 @@ pub use feature_selectors::{
     SerpFeatureSelector,
 };
 
-pub use captcha::{CaptchaSolver, CaptchaSolverConfig, CloudflareClearance};
+pub use captcha::{CaptchaChallengeKind, CaptchaSolver, CaptchaSolverConfig, CloudflareClearance};
 pub use clusters::build_clusters;
 pub use domain::{classify_url, enrich_domain_info, normalize_domain, split_domain};
 pub use engine::{count_organic_results, deduplicate_results, limit_organic_results, SearchEngine};
 pub use error::{Result, SerpError};
 pub use format::{render_envelope, render_image_envelope};
 pub use http_client::HttpClient;
+pub use impersonate::{ImpersonatingClient, ImpersonationPool};
 pub use locale::{
     build_accept_language_header, country_from_region, google_uule, parse_locale, resolve_region,
     yandex_lr,

@@ -17,6 +17,7 @@ pub enum DomainMatchMode {
     Subdomain,
     Exact,
     Wildcard,
+    Directory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -64,6 +65,10 @@ pub struct SerpRankResultItem {
     pub domain: Option<String>,
     #[serde(default)]
     pub is_target: bool,
+    #[serde(default)]
+    pub is_directory: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_category: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +85,12 @@ pub struct RankResponse {
     pub feature_citations: Vec<String>,
     pub pages_scraped: Vec<usize>,
     pub took_ms: i64,
+    #[serde(default)]
+    pub directory_count: usize,
+    #[serde(default)]
+    pub directory_share_pct: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ranking_directories: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serp_results: Vec<SerpRankResultItem>,
 }

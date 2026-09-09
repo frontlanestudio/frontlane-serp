@@ -1,7 +1,11 @@
 pub mod client;
+pub mod edge_worker_script;
 pub mod worker_script;
 
-pub use client::{CloudflareClient, FlareProxDeployment, FlareProxError, FlareProxTestResult};
+pub use client::{
+    resolve_placement, CloudflareClient, FlareProxDeployment, FlareProxError, FlareProxTestResult,
+};
+pub use edge_worker_script::EDGE_WORKER_JS;
 pub use worker_script::FLAREPROX_WORKER_JS;
 
 use serde::{Deserialize, Serialize};
@@ -115,9 +119,7 @@ impl FlareProxConfig {
 /// Checks if a given proxy URL is a FlareProx gateway (e.g. *.workers.dev or scheme flareprox+https)
 pub fn is_flareprox_url(url: &str) -> bool {
     let lower = url.to_lowercase();
-    lower.starts_with("flareprox+")
-        || lower.contains(".workers.dev")
-        || lower.contains("flareprox")
+    lower.starts_with("flareprox+") || lower.contains(".workers.dev") || lower.contains("flareprox")
 }
 
 /// Normalizes a FlareProx gateway URL into an HTTPS worker URL

@@ -129,6 +129,10 @@ pub async fn probe_engine_rank(
                 target_found_on_page = true;
             }
 
+            let is_dir = crate::core::domain::is_directory_domain(&item.domain)
+                || item.domain_info.as_ref().map(|d| d.category.as_str()) == Some("directory");
+            let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
+
             serp_results.push(crate::rank::types::SerpRankResultItem {
                 rank,
                 url: item.url,
@@ -144,6 +148,8 @@ pub async fn probe_engine_rank(
                     Some(item.domain)
                 },
                 is_target,
+                is_directory: is_dir,
+                domain_category,
             });
         }
 
@@ -177,6 +183,10 @@ pub async fn probe_engine_rank(
                         target_found_on_page = true;
                     }
 
+                    let is_dir = crate::core::domain::is_directory_domain(&item.domain)
+                        || item.domain_info.as_ref().map(|d| d.category.as_str()) == Some("directory");
+                    let domain_category = item.domain_info.as_ref().map(|d| d.category.clone());
+
                     serp_results.push(crate::rank::types::SerpRankResultItem {
                         rank,
                         url: item.url,
@@ -192,6 +202,8 @@ pub async fn probe_engine_rank(
                             Some(item.domain)
                         },
                         is_target,
+                        is_directory: is_dir,
+                        domain_category,
                     });
                 }
 
@@ -238,6 +250,21 @@ pub async fn probe_engine_rank(
     }
     feature_citations.dedup();
 
+    let mut directory_count = 0;
+    let mut ranking_directories = Vec::new();
+    for res in &serp_results {
+        if res.is_directory {
+            directory_count += 1;
+            let dir_name = res.domain.as_deref().unwrap_or(&res.url);
+            ranking_directories.push(format!("{} (#{})", dir_name, res.rank));
+        }
+    }
+    let directory_share_pct = if !serp_results.is_empty() {
+        (directory_count as f64 / serp_results.len() as f64) * 100.0
+    } else {
+        0.0
+    };
+
     let took_ms = started.elapsed().as_millis() as i64;
     let (ranked, rank, url, title) = match ranked_hit {
         Some(hit) => {
@@ -266,6 +293,9 @@ pub async fn probe_engine_rank(
         feature_citations,
         pages_scraped,
         took_ms,
+        directory_count,
+        directory_share_pct,
+        ranking_directories,
         serp_results,
     })
 }

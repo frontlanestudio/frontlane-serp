@@ -1,3 +1,6 @@
+pub mod doctor;
+pub mod edge;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
@@ -14,7 +17,7 @@ pub struct Cli {
     pub host: Option<String>,
 
     /// Port to bind server when running without subcommand
-    #[arg(short, long, global = true)]
+    #[arg(long, global = true)]
     pub port: Option<u16>,
 
     /// Path to YAML config file
@@ -56,11 +59,20 @@ pub enum Commands {
     /// Audit and compare target page against top ranking SERP competitors for a keyword
     Audit(AuditArgs),
 
-    /// Run as a Model Context Protocol (MCP) server over stdio
-    Mcp,
+    /// Extract all phone numbers, postal addresses, and email addresses from a page or site
+    Contacts(ContactsArgs),
+
+    /// Run system, network, TLS impersonation, and search engine health checks
+    Doctor(DoctorArgs),
+
+    /// Run MCP server over stdio or install into Claude Desktop / Cursor
+    Mcp(McpArgs),
 
     /// Manage Cloudflare Workers HTTP proxy endpoints for IP rotation (FlareProx)
     Flareprox(FlareproxArgs),
+
+    /// Deploy and manage Frontlane SERP on Cloudflare Workers edge network
+    Edge(EdgeArgs),
 }
 
 #[derive(Args, Debug)]
@@ -109,6 +121,14 @@ pub struct BatchRankArgs {
     #[arg(long, default_value = "false")]
     pub audit: bool,
 
+    /// Match mode: subdomain, exact, wildcard, directory
+    #[arg(short = 'm', long, default_value = "subdomain")]
+    pub r#match: String,
+
+    /// Show detailed directory and aggregator market share breakdown
+    #[arg(long, default_value = "false")]
+    pub directories: bool,
+
     /// Output format to console
     #[arg(short = 'F', long, value_enum, default_value = "text")]
     pub format: CliFormat,
@@ -139,6 +159,32 @@ pub struct AuditArgs {
     pub format: CliFormat,
 
     /// Optional file to save the report (.json, .csv, or .md)
+    #[arg(short, long)]
+    pub output: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ContactsArgs {
+    /// Target page URL or website domain to scan
+    pub url: String,
+
+    /// Crawl internal pages (e.g. contact, about, location, team) across the domain
+    #[arg(short = 'C', long, default_value = "false")]
+    pub crawl: bool,
+
+    /// Maximum pages to scan when crawling (default: 10, max: 50)
+    #[arg(short = 'p', long, default_value = "10")]
+    pub max_pages: usize,
+
+    /// Maximum crawl depth (default: 2)
+    #[arg(short = 'd', long, default_value = "2")]
+    pub max_depth: usize,
+
+    /// Output format: text, json, csv, markdown
+    #[arg(short = 'F', long, value_enum, default_value = "text")]
+    pub format: CliFormat,
+
+    /// Optional file to save results (.json, .csv, or .md)
     #[arg(short, long)]
     pub output: Option<String>,
 }
@@ -250,9 +296,13 @@ pub struct RankArgs {
     #[arg(long, default_value = "false")]
     pub fallback: bool,
 
-    /// Match mode: subdomain, exact, wildcard
+    /// Match mode: subdomain, exact, wildcard, directory
     #[arg(short, long, default_value = "subdomain")]
     pub r#match: String,
+
+    /// Show detailed directory and aggregator market share breakdown
+    #[arg(long, default_value = "false")]
+    pub directories: bool,
 
     /// Device: desktop, mobile
     #[arg(short, long, default_value = "desktop")]
@@ -340,6 +390,10 @@ pub enum FlareproxAction {
         /// Custom name for the worker (only used if count == 1)
         #[arg(long)]
         name: Option<String>,
+
+        /// Target region / placement hint (e.g. de, uk, us, jp, sg, au)
+        #[arg(short = 'r', long)]
+        region: Option<String>,
     },
 
     /// List deployed FlareProx worker endpoints
@@ -368,3 +422,94 @@ pub enum FlareproxAction {
         config: String,
     },
 }
+
+#[derive(Args, Debug)]
+pub struct DoctorArgs {
+    /// Skip live search engine probing
+    #[arg(long, default_value = "false")]
+    pub skip_engines: bool,
+
+    /// Probe a specific search engine (e.g. google, bing, duckduckgo, crates)
+    #[arg(short, long)]
+    pub engine: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct McpArgs {
+    #[command(subcommand)]
+    pub action: Option<McpAction>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum McpAction {
+    /// Run the MCP server over stdio for AI agent connections (default)
+    Serve,
+
+    /// 1-Click installer: Configure Frontlane SERP into Claude Desktop and Cursor
+    Install {
+        /// Target client: all, claude, cursor
+        #[arg(short, long, default_value = "all")]
+        client: String,
+    },
+
+    /// Check MCP configuration status for Claude Desktop and Cursor
+    Status,
+
+    /// Remove Frontlane SERP from Claude Desktop and Cursor configs
+    Uninstall {
+        /// Target client: all, claude, cursor
+        #[arg(short, long, default_value = "all")]
+        client: String,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct EdgeArgs {
+    /// Cloudflare API Token (falls back to CLOUDFLARE_API_TOKEN or config.yaml)
+    #[arg(long, global = true)]
+    pub token: Option<String>,
+
+    /// Cloudflare Account ID (falls back to CLOUDFLARE_ACCOUNT_ID or config.yaml)
+    #[arg(long, global = true)]
+    pub account: Option<String>,
+
+    #[command(subcommand)]
+    pub action: EdgeAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EdgeAction {
+    /// Deploy Main SERP Worker alongside regional FlareProx proxy lanes
+    Deploy {
+        /// Name of the main SERP edge worker
+        #[arg(long, default_value = "frontlane-serp-edge")]
+        name: String,
+
+        /// Number of regional FlareProx proxy workers to spin up
+        #[arg(short = 'n', long, default_value = "3")]
+        proxies: usize,
+
+        /// Target region for proxy egress (e.g. de, uk, us, jp, sg, au)
+        #[arg(short = 'r', long, default_value = "de")]
+        region: String,
+
+        /// Enable autonomous on-demand proxy recycling within the edge worker
+        #[arg(long, default_value = "true")]
+        auto_recycle: bool,
+    },
+
+    /// Check health and deployment status of the edge worker stack
+    Status {
+        /// Name of the main SERP edge worker
+        #[arg(long, default_value = "frontlane-serp-edge")]
+        name: String,
+    },
+
+    /// Tear down main SERP edge worker and all linked proxy workers
+    Destroy {
+        /// Name of the main SERP edge worker to delete
+        #[arg(long, default_value = "frontlane-serp-edge")]
+        name: String,
+    },
+}
+

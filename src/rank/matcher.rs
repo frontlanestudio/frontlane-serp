@@ -59,6 +59,19 @@ pub fn matches_target(candidate_url: &str, target: &str, mode: DomainMatchMode) 
                 cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host))
             }
         }
+        DomainMatchMode::Directory => {
+            let host_matches =
+                cand_host == target_host || cand_host.ends_with(&format!(".{}", target_host));
+            if !host_matches {
+                return false;
+            }
+            if target_path == "/" {
+                true
+            } else {
+                let prefix = target_path.trim_end_matches('/');
+                cand_path == prefix || cand_path.starts_with(&format!("{}/", prefix))
+            }
+        }
     }
 }
 

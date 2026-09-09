@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an OpenSERP improvement that is not engine-specific.
+description: Suggest a Frontlane SERP improvement or new feature.
 title: "feat: "
 labels: ["enhancement"]
 body:
@@ -29,14 +29,15 @@ body:
       label: Area
       options:
         - CLI
-        - API
-        - docs
-        - parser
-        - proxy
-        - captcha
-        - resilience
-        - tests
-        - other
+        - API / Server
+        - Crawler
+        - Extractor
+        - MCP
+        - Anti-Bot & Fingerprinting
+        - Proxy & FlareProx
+        - Docs
+        - Tests
+        - Other
     validations:
       required: true
   - type: checkboxes

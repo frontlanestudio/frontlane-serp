@@ -1,6 +1,8 @@
+pub mod installer;
 pub mod protocol;
 pub mod server;
 
+pub use installer::{install_mcp, status_mcp, uninstall_mcp};
 pub use protocol::{
     JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpTool, McpToolCallContent, McpToolCallResult,
 };

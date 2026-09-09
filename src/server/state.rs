@@ -66,8 +66,30 @@ impl AppState {
         };
         let captcha_solver = Arc::new(CaptchaSolver::new(solver_config));
 
+        // Extraction and crawling hit arbitrary, sometimes Cloudflare-fronted,
+        // third-party sites, so (unlike the search-engine scrapers, which stay
+        // on the plain client above) they get a browser-impersonating
+        // transport when enabled. Falls back to the plain client on build
+        // failure rather than failing server startup over an optional
+        // hardening feature.
+        let scraping_http_client = http_client
+            .clone()
+            .with_impersonation(
+                config.app.browser_impersonation,
+                config.proxies.global.as_deref(),
+                config.server.insecure,
+                config.app.timeout,
+            )
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "failed to initialize browser impersonation client, falling back to plain HTTP client"
+                );
+                http_client.clone()
+            });
+
         let extractor = Arc::new(Extractor::with_solver_and_lanes(
-            http_client.clone(),
+            scraping_http_client.clone(),
             Some((*captcha_solver).clone()),
             Some((*lane_store).clone()),
         ));
@@ -92,7 +114,7 @@ impl AppState {
         let circuit_breaker_manager = Arc::new(CircuitBreakerManager::new(cb_cfg));
 
         let crawler = Arc::new(crate::crawl::Crawler::new(
-            http_client.clone(),
+            scraping_http_client,
             extractor.clone(),
         ));
 

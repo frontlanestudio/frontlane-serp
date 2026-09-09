@@ -34,6 +34,26 @@ domain_source_hints:
   facebook.com: social_media
   linkedin.com: professional_network
   instagram.com: social_media
+  yelp.com: directory
+  yellowpages.com: directory
+  justia.com: directory
+  avvo.com: directory
+  findlaw.com: directory
+  lawyers.com: directory
+  superlawyers.com: directory
+  nolo.com: directory
+  bbb.org: directory
+  expertise.com: directory
+  thumbtack.com: directory
+  angi.com: directory
+  tripadvisor.com: directory
+  healthgrades.com: directory
+  zocdoc.com: directory
+  zillow.com: directory
+  realtor.com: directory
+  g2.com: directory
+  capterra.com: directory
+  clutch.co: directory
 
 news_domains:
   - nytimes.com
@@ -106,3 +126,57 @@ social_domains:
   - youtube.com
   - twitch.tv
   - discord.com
+
+directory_domains:
+  # Legal Directories & Portals
+  - justia.com
+  - avvo.com
+  - findlaw.com
+  - lawyers.com
+  - superlawyers.com
+  - nolo.com
+  - martindale.com
+  - martindale-avvo.com
+  - legal500.com
+  - bestlawyers.com
+  - lawyersinca.com
+  - hg.org
+  - usattorneys.com
+  - leadcounsel.org
+  # Local Services & Consumer Directories
+  - yelp.com
+  - yellowpages.com
+  - bbb.org
+  - angi.com
+  - angis.com
+  - thumbtack.com
+  - tripadvisor.com
+  - manta.com
+  - expertise.com
+  - houzz.com
+  - porch.com
+  - mapquest.com
+  - chamberofcommerce.com
+  # Healthcare & Medical Directories
+  - healthgrades.com
+  - zocdoc.com
+  - webmd.com
+  - vitals.com
+  - ratemds.com
+  - psychologytoday.com
+  - castleconnolly.com
+  # B2B & Software Directories
+  - g2.com
+  - capterra.com
+  - trustradius.com
+  - softwareadvice.com
+  - getapp.com
+  - clutch.co
+  - upwork.com
+  # Real Estate Directories
+  - zillow.com
+  - realtor.com
+  - redfin.com
+  - trulia.com
+  - homes.com
+  - loopnet.com

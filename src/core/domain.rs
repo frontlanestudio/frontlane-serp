@@ -17,6 +17,8 @@ struct EnrichmentFile {
     marketplace_domains: Vec<String>,
     #[serde(default)]
     social_domains: Vec<String>,
+    #[serde(default)]
+    directory_domains: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -26,6 +28,7 @@ struct EnrichmentConfig {
     forum_domains: HashSet<String>,
     marketplace_domains: HashSet<String>,
     social_domains: HashSet<String>,
+    directory_domains: HashSet<String>,
 }
 
 static ENRICHMENT_CONFIG: OnceLock<EnrichmentConfig> = OnceLock::new();
@@ -45,6 +48,7 @@ fn get_enrichment_config() -> &'static EnrichmentConfig {
             forum_domains: Vec::new(),
             marketplace_domains: Vec::new(),
             social_domains: Vec::new(),
+            directory_domains: Vec::new(),
         });
 
         let mut hints = HashMap::new();
@@ -68,8 +72,30 @@ fn get_enrichment_config() -> &'static EnrichmentConfig {
             forum_domains: to_set(file.forum_domains),
             marketplace_domains: to_set(file.marketplace_domains),
             social_domains: to_set(file.social_domains),
+            directory_domains: to_set(file.directory_domains),
         }
     })
+}
+
+pub fn is_directory_domain(domain: &str) -> bool {
+    if domain.trim().is_empty() {
+        return false;
+    }
+    let norm = normalize_domain(domain);
+    let cfg = get_enrichment_config();
+    if cfg.directory_domains.contains(&norm) {
+        return true;
+    }
+    let (tld, sld) = split_domain(&norm);
+    if let (Some(t), Some(s)) = (tld, sld) {
+        let registrable = format!("{}.{}", s, t);
+        if cfg.directory_domains.contains(&registrable) {
+            return true;
+        }
+    }
+    cfg.directory_domains
+        .iter()
+        .any(|d| norm == *d || norm.ends_with(&format!(".{}", d)))
 }
 
 pub fn normalize_domain(domain: &str) -> String {
@@ -139,6 +165,9 @@ fn domain_category(domain: &str, tld: Option<&str>, cfg: &EnrichmentConfig) -> S
     if cfg.social_domains.contains(domain) {
         return "social".to_string();
     }
+    if cfg.directory_domains.contains(domain) || is_directory_domain(domain) {
+        return "directory".to_string();
+    }
     String::new()
 }
 
@@ -177,6 +206,16 @@ pub fn classify_content_type(raw_url: &str) -> String {
         || lower.contains("/news/")
     {
         "article".to_string()
+    } else if lower.contains("/directory/")
+        || lower.contains("/lawyers/")
+        || lower.contains("/attorneys/")
+        || lower.contains("/profile/")
+        || lower.contains("/biz/")
+        || lower.contains("/companies/")
+        || lower.contains("/find/")
+        || lower.contains("/near-me/")
+    {
+        "directory_listing".to_string()
     } else {
         "webpage".to_string()
     }

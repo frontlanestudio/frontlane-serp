@@ -3,6 +3,15 @@ FROM rust:1.85-bookworm AS builder
 
 WORKDIR /build
 
+# Build dependencies for the vendored BoringSSL used by the browser TLS
+# fingerprint impersonation client (wreq/boring-sys): cmake and a C/C++
+# toolchain to build it, pkg-config so it's discoverable, clang/libclang for
+# bindgen's FFI binding generation, and git since boring-sys fetches its
+# BoringSSL source as a submodule-style checkout.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends cmake perl pkg-config clang libclang-dev git \
+  && rm -rf /var/lib/apt/lists/*
+
 # Copy source code and build release binary
 COPY . .
 RUN cargo build --release

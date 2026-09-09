@@ -1,7 +1,10 @@
+pub mod contacts;
 pub mod llmstxt;
 pub mod readability;
 
-use crate::core::captcha::CaptchaSolver;
+pub use contacts::{extract_contacts_from_html, scan_contacts, AddressInfo, ContactInfo, PageContacts};
+
+use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolver};
 use crate::core::error::Result;
 use crate::core::http_client::HttpClient;
 use crate::core::proxy::{LaneStore, ProxyLaneKey};
@@ -28,6 +31,83 @@ pub fn is_cloudflare_challenge(status: reqwest::StatusCode, body: &str) -> bool 
 
     is_challenge_status && has_challenge_marker
         || (has_challenge_marker && body_lower.contains("cloudflare"))
+}
+
+/// Scans a (non-Cloudflare-challenge) page body for a reCAPTCHA v2/v3 or
+/// hCaptcha widget and, if found, extracts its site key. This is a targeted
+/// DOM scan, not a general-purpose bot-detection heuristic -- it only fires
+/// on pages that actually embed one of these three widgets, so it's safe to
+/// run on every extraction rather than gating it behind a status code the
+/// way `is_cloudflare_challenge` does (these show up on plain HTTP 200
+/// pages just as often as on 403s).
+///
+/// Unlike Cloudflare's Turnstile, there's no cookie earned by solving one of
+/// these -- see `CaptchaChallengeKind` for why solving only gets you a
+/// token, not automatic access.
+pub fn detect_third_party_captcha(body: &str) -> Option<CaptchaChallengeKind> {
+    let document = scraper::Html::parse_document(body);
+
+    if let Ok(sel) = scraper::Selector::parse(".h-captcha[data-sitekey]") {
+        if let Some(el) = document.select(&sel).next() {
+            if let Some(key) = el.value().attr("data-sitekey") {
+                let key = key.trim();
+                if !key.is_empty() {
+                    return Some(CaptchaChallengeKind::HCaptcha {
+                        site_key: key.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    if let Ok(sel) = scraper::Selector::parse(".g-recaptcha[data-sitekey]") {
+        if let Some(el) = document.select(&sel).next() {
+            if let Some(key) = el.value().attr("data-sitekey") {
+                let key = key.trim();
+                if !key.is_empty() {
+                    return Some(CaptchaChallengeKind::RecaptchaV2 {
+                        site_key: key.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // reCAPTCHA v3 (and "invisible" v2) has no DOM widget with a
+    // `data-sitekey` -- it's loaded and invoked entirely from a script tag:
+    // <script src="https://www.google.com/recaptcha/api.js?render=SITE_KEY">
+    if let Ok(sel) = scraper::Selector::parse(r#"script[src*="recaptcha/api.js"]"#) {
+        for el in document.select(&sel) {
+            if let Some(src) = el.value().attr("src") {
+                if let Some(key) = query_param(src, "render") {
+                    if key != "explicit" && !key.is_empty() {
+                        return Some(CaptchaChallengeKind::RecaptchaV3 {
+                            site_key: key,
+                            action: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Pulls one query parameter's value out of a URL string. Small and local
+/// rather than pulling in `url::Url` for a script `src` attribute that isn't
+/// necessarily a valid absolute URL to begin with.
+fn query_param(url: &str, param: &str) -> Option<String> {
+    let query = url.split('?').nth(1)?;
+    for pair in query.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next()?;
+        let value = parts.next().unwrap_or("");
+        if key == param {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 #[derive(Clone)]
@@ -83,6 +163,7 @@ impl Extractor {
                 error: Some(e.to_string()),
                 json_ld: Vec::new(),
                 meta_tags: std::collections::HashMap::new(),
+                ..Default::default()
             });
         }
 
@@ -97,6 +178,7 @@ impl Extractor {
                     error: None,
                     json_ld: Vec::new(),
                     meta_tags: std::collections::HashMap::new(),
+                    ..Default::default()
                 });
             }
         }
@@ -122,13 +204,14 @@ impl Extractor {
         // 2. Fetch raw page
         let (status, body) = match self
             .http_client
-            .fetch_raw_response_with_proxy(
+            .fetch_raw_response_with_proxy_and_lane(
                 url,
                 proxy_url,
                 None,
                 initial_ua,
                 initial_cookie.as_deref(),
                 None,
+                lane_key,
             )
             .await
         {
@@ -143,6 +226,7 @@ impl Extractor {
                     error: Some(e.to_string()),
                     json_ld: Vec::new(),
                     meta_tags: std::collections::HashMap::new(),
+                    ..Default::default()
                 });
             }
         };
@@ -164,13 +248,14 @@ impl Extractor {
                             let cookie_header = format!("cf_clearance={}", clearance.cf_clearance);
                             match self
                                 .http_client
-                                .fetch_raw_response_with_proxy(
+                                .fetch_raw_response_with_proxy_and_lane(
                                     url,
                                     proxy_url,
                                     None,
                                     Some(&clearance.user_agent),
                                     Some(&cookie_header),
                                     None,
+                                    lane_key,
                                 )
                                 .await
                             {
@@ -196,6 +281,7 @@ impl Extractor {
                                             error: None,
                                             json_ld,
                                             meta_tags,
+                                            ..Default::default()
                                         });
                                     }
                                 }
@@ -212,6 +298,7 @@ impl Extractor {
                                         )),
                                         json_ld: Vec::new(),
                                         meta_tags: std::collections::HashMap::new(),
+                                        ..Default::default()
                                     });
                                 }
                             }
@@ -226,6 +313,7 @@ impl Extractor {
                                 error: Some(format!("cloudflare challenge solve failed: {}", e)),
                                 json_ld: Vec::new(),
                                 meta_tags: std::collections::HashMap::new(),
+                                ..Default::default()
                             });
                         }
                     }
@@ -245,6 +333,7 @@ impl Extractor {
                 )),
                 json_ld: Vec::new(),
                 meta_tags: std::collections::HashMap::new(),
+                ..Default::default()
             });
         }
 
@@ -259,7 +348,35 @@ impl Extractor {
                 error: Some(format!("HTTP status {}", status)),
                 json_ld: Vec::new(),
                 meta_tags: std::collections::HashMap::new(),
+                ..Default::default()
             });
+        }
+
+        // Non-Cloudflare CAPTCHA gate (reCAPTCHA v2/v3, hCaptcha). These
+        // don't block extraction the way a Cloudflare challenge does -- the
+        // page often still has readable content around or behind the
+        // widget -- so this only annotates the result rather than
+        // short-circuiting it. If a solver is configured, solve it and
+        // surface the token; the caller submits it to whatever the page
+        // itself expects (see `ExtractedContent::captcha_token`).
+        let mut captcha_challenge = None;
+        let mut captcha_site_key = None;
+        let mut captcha_token = None;
+        let mut captcha_solve_error = None;
+        if let Some(challenge) = detect_third_party_captcha(&body) {
+            captcha_challenge = Some(challenge.kind_str().to_string());
+            captcha_site_key = Some(challenge.site_key().to_string());
+            if let Some(ref solver) = self.solver {
+                if solver.is_enabled() {
+                    match solver
+                        .solve_third_party_captcha(url, &challenge, proxy_url)
+                        .await
+                    {
+                        Ok(token) => captcha_token = Some(token),
+                        Err(e) => captcha_solve_error = Some(e.to_string()),
+                    }
+                }
+            }
         }
 
         let page = readability::extract_page_content(&body);
@@ -280,9 +397,12 @@ impl Extractor {
             content: Some(page.markdown),
             mode_used: Some(mode_used),
             fetched_at: Some(now),
-            error: None,
+            error: captcha_solve_error,
             json_ld,
             meta_tags,
+            captcha_challenge,
+            captcha_site_key,
+            captcha_token,
         })
     }
 }
@@ -349,8 +469,97 @@ pub fn extract_structured_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::captcha::{CaptchaSolverConfig, CloudflareClearance};
+    use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolverConfig, CloudflareClearance};
     use reqwest::StatusCode;
+
+    #[test]
+    fn test_detect_recaptcha_v2() {
+        let html = r#"
+            <!DOCTYPE html>
+            <html>
+            <body>
+                <form>
+                    <div class="g-recaptcha" data-sitekey="6LdAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"></div>
+                </form>
+            </body>
+            </html>
+        "#;
+        let challenge = detect_third_party_captcha(html);
+        assert_eq!(
+            challenge,
+            Some(CaptchaChallengeKind::RecaptchaV2 {
+                site_key: "6LdAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_detect_hcaptcha() {
+        let html = r#"
+            <!DOCTYPE html>
+            <html>
+            <body>
+                <div class="h-captcha" data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>
+            </body>
+            </html>
+        "#;
+        let challenge = detect_third_party_captcha(html);
+        assert_eq!(
+            challenge,
+            Some(CaptchaChallengeKind::HCaptcha {
+                site_key: "10000000-ffff-ffff-ffff-000000000001".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_detect_recaptcha_v3() {
+        let html = r#"
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <script src="https://www.google.com/recaptcha/api.js?render=6LeV3siteKeyValue"></script>
+            </head>
+            <body></body>
+            </html>
+        "#;
+        let challenge = detect_third_party_captcha(html);
+        assert_eq!(
+            challenge,
+            Some(CaptchaChallengeKind::RecaptchaV3 {
+                site_key: "6LeV3siteKeyValue".to_string(),
+                action: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_detect_third_party_captcha_none_on_clean_page() {
+        let html = r#"
+            <!DOCTYPE html>
+            <html>
+            <head><title>My Clean Web Page</title></head>
+            <body><main><p>Real content here, no captcha at all.</p></main></body>
+            </html>
+        "#;
+        assert_eq!(detect_third_party_captcha(html), None);
+    }
+
+    #[test]
+    fn test_detect_recaptcha_v3_ignores_explicit_render() {
+        // `render=explicit` means the page calls grecaptcha.render() itself
+        // with its own sitekey elsewhere -- it's not a sitekey.
+        let html = r#"
+            <script src="https://www.google.com/recaptcha/api.js?render=explicit"></script>
+            <div class="g-recaptcha" data-sitekey="real-site-key"></div>
+        "#;
+        assert_eq!(
+            detect_third_party_captcha(html),
+            Some(CaptchaChallengeKind::RecaptchaV2 {
+                site_key: "real-site-key".to_string()
+            })
+        );
+    }
 
     #[test]
     fn test_detect_cloudflare_challenge() {

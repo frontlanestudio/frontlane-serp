@@ -33,6 +33,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/stats/cache", get(cache_stats_handler))
         .route("/stats/proxy", get(proxy_stats_handler))
         .route("/stats/cb", get(circuit_breaker_stats_handler))
+        // Documentation & OpenAPI
+        .route("/openapi.yaml", get(openapi_yaml_handler))
+        .route("/docs", get(swagger_ui_handler))
+        .route("/docs/", get(swagger_ui_handler))
         // Mega
         .route("/mega/search", get(mega_search_handler))
         .route("/mega/image", get(mega_image_handler))
@@ -46,6 +50,7 @@ pub fn create_router(state: AppState) -> Router {
         // Extraction & Crawl
         .route("/extract", get(extract_handler).post(extract_post_handler))
         .route("/extract/batch", post(extract_batch_handler))
+        .route("/extract/contacts", get(extract_contacts_get_handler).post(extract_contacts_post_handler))
         .route("/crawl", post(crawl_post_handler))
         // Serper Compatibility
         .route("/v1/serper/search", post(serper_search_handler))

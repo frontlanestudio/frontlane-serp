@@ -1,80 +1,94 @@
 # Adding a Search Engine
 
-This is the short checklist for adding a new engine. Keep the first PR small:
-web search, deterministic parser tests, and registration. Add images or advanced
-parameters in follow-up PRs.
+This guide describes how to add a new search engine to **Frontlane SERP**.
 
-## 1. Create the engine package
+Keep initial pull requests small and focused: start with web search, deterministic HTML parsing tests using mock fixtures, and engine registration. Add image search or advanced parameters in follow-up pull requests.
 
-Use an existing engine package as the template. A complete engine normally has:
+---
 
-- `url.go` - pure URL builders that reject an empty query.
-- `selectors.go` - stable selectors shared by browser mode, raw mode, and parser tests.
-- `parse_html.go` - `ParseHTML(io.Reader)` using goquery.
-- `search.go` - browser-mode implementation using `core.Browser`.
-- `search_raw.go` - optional raw HTTP implementation.
-- `features.go` - optional SERP feature extraction.
-- `*_test.go` and `testdata/` - URL and parser fixtures.
+## 1. Engine Directory Structure
 
-Prefer stable data attributes over generated CSS classes. When a selector is
-fragile, add two or three explicit fallbacks in `selectors.go`.
+Engines live in `src/engines/`. Standard engines with dedicated HTML parsing and feature extraction live in their own subdirectory:
 
-## 2. Implement the search contract
-
-Browser engines implement `core.SearchEngine`:
-
-- `Search(context.Context, core.Query) ([]core.SearchResult, error)`
-- `SearchImage(context.Context, core.Query) ([]core.SearchResult, error)`
-- `IsInitialized() bool`
-- `Name() string`
-- `GetRateLimiter() *rate.Limiter`
-
-Raw engines should expose a `ParseHTML(io.Reader)` path so tests and
-`POST /{engine}/parse` can use the same parser.
-
-## 3. Register the engine
-
-Update:
-
-- `cmd/engines.go` with one `engineSpec` row. This central registry drives
-  server wiring, CLI dispatch, aliases, parser endpoints, and raw-mode support.
-- `config.yaml` with rate limits and optional proxy tag.
-- `README.md` and `docs/openapi.yaml` when public endpoints or parameters change.
-
-Set `rawSearchFn` only when the engine has raw HTTP support, and set
-`parseHTMLFn` when `POST /{engine}/parse` should be available. Touch
-`cmd/serve.go` or `cmd/root.go` only for new global behavior or flags, not for
-ordinary engine registration.
-
-## 4. Add tests
-
-Required for the first PR:
-
-- Table-driven URL builder tests.
-- Parser tests using small sanitized HTML fixtures.
-- Integration tests only when needed, gated with `testutil.RequireIntegration(t)`.
-
-Default tests must pass without browser or network access:
-
-```bash
-make test
+```text
+src/engines/<name>/
+├── mod.rs        # Engine struct and SearchEngine trait implementation
+├── parser.rs     # HTML parsing and result extraction (using `scraper`)
+└── features.rs   # Optional SERP feature extractors (knowledge panels, PAA, etc.)
 ```
 
-Run live/browser checks only for engine behavior:
+Simpler API-based engines can be implemented as a single file, e.g., `src/engines/<name>.rs`.
 
-```bash
-make test-integration
+---
+
+## 2. Implement the `SearchEngine` Trait
+
+Every engine implements the async trait `crate::core::engine::SearchEngine`:
+
+```rust
+use async_trait::async_trait;
+use crate::core::engine::SearchEngine;
+use crate::core::error::Result;
+use crate::core::http_client::HttpClient;
+use crate::core::types::{Envelope, ImageEnvelope, Query, SearchResult};
+
+pub struct MyEngine {
+    client: HttpClient,
+    rate_limiter: Arc<RateLimiter>,
+}
+
+#[async_trait]
+impl SearchEngine for MyEngine {
+    fn name(&self) -> &str {
+        "myengine"
+    }
+
+    async fn search(&self, query: &Query) -> Result<Vec<SearchResult>> {
+        // Build URL, fetch page/API via self.client, parse results
+        todo!()
+    }
+
+    async fn search_image(&self, query: &Query) -> Result<Vec<SearchResult>> {
+        // Optional image search support
+        todo!()
+    }
+}
 ```
 
-## 5. Open the PR
+### Best Practices for Parsers
+- Prefer stable data attributes (`data-testid`, semantic `<article>`, `role="..."`) over minified or dynamically generated CSS class names.
+- When selectors are brittle across regions, provide 2 or 3 fallback CSS selectors.
+- Always normalize URLs (convert protocol-relative `//` and query tracking redirects).
 
-Before opening the PR:
+---
+
+## 3. Register the Engine
+
+1. **Export the Engine**: Add `pub mod <name>;` to [src/engines/mod.rs](file:///Users/bhubbard/PROJECTS/frontlane-serp/src/engines/mod.rs).
+2. **Register in the Engine Registry**: Add the engine instance to `build_all_engines` in [src/main.rs](file:///Users/bhubbard/PROJECTS/frontlane-serp/src/main.rs).
+3. **Configure Rate Limits**: Add default concurrency and rate limit settings in [config.yaml](file:///Users/bhubbard/PROJECTS/frontlane-serp/config.yaml).
+4. **Documentation**: Update [README.md](file:///Users/bhubbard/PROJECTS/frontlane-serp/README.md) and [docs/openapi.yaml](file:///Users/bhubbard/PROJECTS/frontlane-serp/docs/openapi.yaml).
+
+---
+
+## 4. Add Tests
+
+Add unit and integration tests in `tests/<name>_test.rs`:
+- Use sanitized, static HTML fixtures in `tests/fixtures/<name>/` to verify title, URL, snippet, and position extraction deterministically.
+- All default tests must run offline and pass without network or browser dependencies:
 
 ```bash
-make fmt
-make lint
-make test
+cargo test --test <name>_test
 ```
 
-Keep the PR focused. A good first engine PR should not refactor shared browser,
-server, or response-envelope behavior unless the engine cannot work without it.
+---
+
+## 5. Verification Before Submitting PR
+
+Before opening your pull request, run:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```

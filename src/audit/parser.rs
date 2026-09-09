@@ -22,7 +22,10 @@ pub fn parse_page_audit(
     // Domain
     let domain = Url::parse(page_url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| h.trim_start_matches("www.").to_string())
+        })
         .unwrap_or_default();
 
     // Title
@@ -48,27 +51,51 @@ pub fn parse_page_audit(
     // Headings
     let h1: Vec<String> = doc
         .select(&Selector::parse("h1").unwrap())
-        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|el| {
+            el.text()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .filter(|s| !s.is_empty())
         .collect();
     let h1_exact_match = h1.iter().any(|h| h.to_lowercase().contains(&norm_kw));
 
     let h2_headings: Vec<String> = doc
         .select(&Selector::parse("h2").unwrap())
-        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|el| {
+            el.text()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .filter(|s| !s.is_empty() && s.len() > 3)
         .collect();
     let h2_count = h2_headings.len();
 
     let h3_headings: Vec<String> = doc
         .select(&Selector::parse("h3").unwrap())
-        .map(|el| el.text().collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|el| {
+            el.text()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .filter(|s| !s.is_empty() && s.len() > 3)
         .collect();
 
     // Questions extracted from H2 & H3
     let mut questions_found = Vec::new();
-    let question_starters = ["what", "how", "why", "can", "when", "where", "who", "do", "does", "is", "are", "which", "should"];
+    let question_starters = [
+        "what", "how", "why", "can", "when", "where", "who", "do", "does", "is", "are", "which",
+        "should",
+    ];
     for heading in h2_headings.iter().chain(h3_headings.iter()) {
         let hl = heading.to_lowercase();
         if (heading.ends_with('?') || question_starters.iter().any(|&q| hl.starts_with(q)))
@@ -102,10 +129,7 @@ pub fn parse_page_audit(
         })
         .unwrap_or_default();
 
-    let words: Vec<&str> = WORD_RE
-        .find_iter(&body_text)
-        .map(|m| m.as_str())
-        .collect();
+    let words: Vec<&str> = WORD_RE.find_iter(&body_text).map(|m| m.as_str()).collect();
     let word_count = words.len();
 
     let body_lower = body_text.to_lowercase();
@@ -130,20 +154,25 @@ pub fn parse_page_audit(
     let url_lower = page_url.to_lowercase();
     let slug_has_exact_kw = url_lower.contains(&kw_slug);
     // Dynamic query word presence in URL path
-    let kw_words: Vec<&str> = norm_kw.split_whitespace().filter(|w| w.len() >= 3).collect();
-    let path = Url::parse(page_url).map(|u| u.path().to_string()).unwrap_or_default();
+    let kw_words: Vec<&str> = norm_kw
+        .split_whitespace()
+        .filter(|w| w.len() >= 3)
+        .collect();
+    let path = Url::parse(page_url)
+        .map(|u| u.path().to_string())
+        .unwrap_or_default();
     let path_lower = path.to_lowercase();
-    let slug_has_kw_terms = !kw_words.is_empty() && kw_words.iter().filter(|&&w| path_lower.contains(w)).count() >= (kw_words.len() / 2).max(1);
-    let is_dedicated_page = path.len() > 1 && path != "/" && (slug_has_exact_kw || slug_has_kw_terms);
+    let slug_has_kw_terms = !kw_words.is_empty()
+        && kw_words.iter().filter(|&&w| path_lower.contains(w)).count()
+            >= (kw_words.len() / 2).max(1);
+    let is_dedicated_page =
+        path.len() > 1 && path != "/" && (slug_has_exact_kw || slug_has_kw_terms);
     let slug_has_geo = slug_has_kw_terms;
 
     // Directory / Aggregator detection
-    let known_directories = [
-        "yelp.com", "yellowpages.com", "bbb.org", "wikipedia.org", "forbes.com",
-        "expertise.com", "angis.com", "thumbtack.com", "tripadvisor.com", "manta.com",
-        "justia.com", "avvo.com", "findlaw.com", "lawyers.com", "superlawyers.com", "nolo.com"
-    ];
-    let is_directory_aggregator = known_directories.iter().any(|&d| domain.contains(d));
+    let is_directory_aggregator = crate::core::domain::is_directory_domain(&domain)
+        || domain.contains("wikipedia.org")
+        || domain.contains("forbes.com");
 
     // Canonical link & Robots meta
     let canonical_url = doc
@@ -169,9 +198,7 @@ pub fn parse_page_audit(
     let tel_links_count = doc
         .select(&Selector::parse("a[href^='tel:']").unwrap())
         .count();
-    let form_count = doc
-        .select(&Selector::parse("form").unwrap())
-        .count();
+    let form_count = doc.select(&Selector::parse("form").unwrap()).count();
 
     // Schema analysis & Ratings/Reviews
     let mut schema_types = Vec::new();
@@ -193,10 +220,14 @@ pub fn parse_page_audit(
     let has_local_business_schema = st_lower.iter().any(|s| {
         s.contains("localbusiness") || s.contains("attorney") || s.contains("legalservice")
     });
-    let has_review_rating_schema = st_lower.iter().any(|s| {
-        s.contains("aggregaterating") || s.contains("review")
-    }) || rating_value.is_some() || review_count.is_some();
-    let has_faq_schema = st_lower.iter().any(|s| s.contains("faqpage") || s.contains("question"));
+    let has_review_rating_schema = st_lower
+        .iter()
+        .any(|s| s.contains("aggregaterating") || s.contains("review"))
+        || rating_value.is_some()
+        || review_count.is_some();
+    let has_faq_schema = st_lower
+        .iter()
+        .any(|s| s.contains("faqpage") || s.contains("question"));
 
     PageAuditResult {
         rank_label,
@@ -274,7 +305,11 @@ fn extract_schema_types(val: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-fn extract_ratings_and_reviews(val: &serde_json::Value, rating: &mut Option<f64>, reviews: &mut Option<u64>) {
+fn extract_ratings_and_reviews(
+    val: &serde_json::Value,
+    rating: &mut Option<f64>,
+    reviews: &mut Option<u64>,
+) {
     match val {
         serde_json::Value::Object(map) => {
             if let Some(serde_json::Value::Object(ar)) = map.get("aggregateRating") {

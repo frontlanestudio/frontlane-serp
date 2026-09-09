@@ -45,14 +45,47 @@ frontlane-serp/
 │   │   ├── crates.rs    # Crates.io API
 │   │   └── wikipedia.rs # Wikipedia OpenSearch API
 │   ├── extract/         # Web page extraction, readability, OpenGraph & JSON-LD
+│   ├── flareprox/       # FlareProx Cloudflare Worker proxy & Edge SERP generator
+│   │   ├── client.rs    # Cloudflare REST v4 API client & regional placement
+│   │   ├── worker_script.rs # Regional proxy worker script generator
+│   │   └── edge_worker_script.rs # Main Edge SERP Worker with RRF & recycling
 │   ├── jobs/            # Async batch rank-tracking queue & webhooks
-│   ├── mcp/             # Model Context Protocol (stdio JSON-RPC) server
+│   ├── mcp/             # Model Context Protocol (stdio JSON-RPC) server & installer
 │   ├── mega/            # Reciprocal Rank Fusion (RRF) multi-engine searcher
 │   ├── rank/            # Smart neighbor probing & domain matching
-│   ├── server/          # Axum HTTP routes, handlers, and middleware
+│   ├── server/          # Axum HTTP routes, OpenAPI/Swagger UI, and middleware
 │   └── suggest/         # Autocomplete / OpenSearch suggestion client
 └── tests/               # Integration tests with HTML fixtures
 ```
+
+## Cloudflare Edge & Regional FlareProx Architecture
+
+Frontlane SERP can run either as a local/containerized daemon or directly at the edge across Cloudflare's global network:
+
+```text
+[User / AI Agent]
+       │
+       ▼
+[Main Edge SERP Worker] (frontlane-serp-edge)
+ ├── /docs (Interactive Swagger UI)
+ ├── /mega/search (Multi-Engine Search & Edge RRF Fusion)
+ └── /api/proxies/recycle (On-Demand Cloudflare v4 Worker Management)
+       │
+       ├─────────────────────────┬─────────────────────────┐
+       ▼                         ▼                         ▼
+ [FlareProx Lane 1]        [FlareProx Lane 2]        [FlareProx Lane 3]
+ (Smart Placement: FRA)    (Smart Placement: FRA)    (Smart Placement: FRA)
+ (German Egress IP)        (German Egress IP)        (German Egress IP)
+       │                         │                         │
+       ▼                         ▼                         ▼
+   [Google DE]               [Bing DE]                 [DuckDuckGo]
+```
+
+### 1. Smart Placement & Regional Egress
+Cloudflare Workers execute serverless code at nearest edge points by default. For localized search engine results (e.g. Google DE requiring German egress), FlareProx injects `placement: { "mode": "smart", "region": "aws:eu-central-1" }` into the Cloudflare Worker upload metadata, binding egress to the target jurisdiction without requiring dedicated residential proxy subscriptions.
+
+### 2. Autonomous Proxy Recycling
+When search engines trigger CAPTCHA or rate-limiting gates, the Main Edge Worker's `/api/proxies/recycle` endpoint utilizes Cloudflare's REST API v4 to dynamically provision new localized worker scripts and delete stale proxy lanes on demand.
 
 ## Core Trait: `SearchEngine`
 

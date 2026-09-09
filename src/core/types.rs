@@ -12,6 +12,7 @@ pub const API_VERSION: &str = "2.1";
 pub enum OutputFormat {
     #[default]
     Json,
+    Csv,
     Markdown,
     Text,
     Ndjson,
@@ -20,6 +21,7 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
+            "csv" => OutputFormat::Csv,
             "markdown" | "md" => OutputFormat::Markdown,
             "text" | "txt" => OutputFormat::Text,
             "ndjson" | "jsonl" => OutputFormat::Ndjson,
@@ -137,7 +139,7 @@ pub struct Classification {
     pub source_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractedContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -155,6 +157,26 @@ pub struct ExtractedContent {
     pub json_ld: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub meta_tags: std::collections::HashMap<String, String>,
+    /// Set when the page turned out to be gated by a non-Cloudflare CAPTCHA
+    /// (reCAPTCHA v2/v3, hCaptcha) that was detected in the response body.
+    /// One of `"recaptcha_v2"`, `"recaptcha_v3"`, `"hcaptcha"`. Cloudflare's
+    /// own Turnstile challenge is handled inline (see `mode_used` /
+    /// `fast+cf_clearance`) and never surfaces here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captcha_challenge: Option<String>,
+    /// The site key extracted from the page for the detected challenge, if
+    /// any. Needed to submit a solved token to the site's own verification
+    /// endpoint, which -- unlike Cloudflare's `cf_clearance` -- varies site
+    /// to site and can't be generalized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captcha_site_key: Option<String>,
+    /// The solved response token (`g-recaptcha-response` / `h-captcha-response`
+    /// equivalent) from the configured solver, when a challenge was detected
+    /// and solving succeeded. `None` with `captcha_challenge` set means a
+    /// challenge was detected but not solved (no solver configured, or it
+    /// failed -- see `error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captcha_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

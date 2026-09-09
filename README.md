@@ -18,9 +18,12 @@ No API keys, no per-search billing: one command gives you live, structured searc
 - **Megasearch with RRF**: One query across several engines at once with **Reciprocal Rank Fusion (RRF)** and engine consensus scoring.
 - **Deep Content & Metadata Extraction**: Search results plus clean markdown, OpenGraph tags, Twitter cards, and Schema.org JSON-LD structured data.
 - **Domain-Restricted Web Crawler**: Async BFS crawler with depth limits, domain filtering, robots.txt compliance, and SSRF guard protection.
+- **Cloudflare & Anti-Bot Hardening**: Managed-challenge (Turnstile) solving via 2Captcha/CapSolver with per-proxy-lane `cf_clearance` caching, reCAPTCHA v2/v3 and hCaptcha detection/solving for non-Cloudflare gates, and browser TLS/JA3 fingerprint impersonation so extraction and crawling requests match real Chrome at the handshake level, not just in headers.
 - **Smart Rank Probing**: Probes rankings using target neighbor page windows (`[P-1, P, P+1]`) to cut crawling volume by 70–90%.
 - **Keyword Autocomplete**: Instant suggestion expansion across Google, Bing, DuckDuckGo, and Ecosia.
-- **Native MCP Server**: Instant integration for Claude Desktop, Cursor, Antigravity, and Claude Code (`frontlane-serp mcp`).
+- **Cloudflare Edge Deployment & FlareProx**: Deploy the entire SERP search engine, RRF fusion, and proxy rotation to Cloudflare Workers with one command (`frontlane-serp edge deploy --region de`). Features regional proxy placement and dynamic on-demand proxy worker creation/recycling via the Cloudflare REST API.
+- **Diagnostic Tool & 1-Click MCP Setup**: Built-in `frontlane-serp doctor` for self-diagnosing network, ports, TLS, and engine access, plus `frontlane-serp mcp install` for instant Claude Desktop and Cursor setup.
+- **Interactive Swagger UI & OpenAPI**: Full OpenAPI 3.0 specification served directly with Swagger UI at `/docs` (and root browser redirect).
 - **Drop-In Serper & SerpApi Compatibility**: Drop-in emulation for `POST /v1/serper/search` and `GET /v1/serpapi/search`.
 - **Embedded Batch Jobs**: Asynchronous rank-tracking queue with bounded concurrency and webhook notifications.
 
@@ -222,7 +225,25 @@ Returns:
 - Discovered internal links
 - Extracted OpenGraph and Schema.org JSON-LD structured data
 
-### 4. Smart Rank Probing (`/{engine}/rank`)
+### 4. Contact & Address Extraction (`/extract/contacts`)
+
+Discover and aggregate all phone numbers, physical postal addresses, email addresses, and social profile links from a web page or entire site:
+
+```bash
+# Scan single page
+curl "http://127.0.0.1:7000/extract/contacts?url=https://example.com"
+
+# Crawl site for contact info
+curl -X POST "http://127.0.0.1:7000/extract/contacts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "crawl": true,
+    "max_pages": 10
+  }'
+```
+
+### 5. Smart Rank Probing (`/{engine}/rank`)
 
 Tracks rankings for target domains or URLs with intelligent neighbor page windowing (`[P-1, P, P+1]`) to eliminate 70–90% of crawling overhead:
 
@@ -266,6 +287,17 @@ curl -X POST "http://127.0.0.1:7000/v1/rank/batch" \
 
 ---
 
+## Cloudflare & Anti-Bot Handling
+
+Page extraction and crawling (not search-engine scraping, which isn't Cloudflare-fronted) go through a few layers of hardening against managed challenges:
+
+- **Managed-challenge (Turnstile) solving** via 2Captcha or CapSolver (`captcha.provider` / `captcha.apikey` in `config.yaml`), with the resulting `cf_clearance` cookie cached per proxy lane so it's reused across requests instead of re-solved every time.
+- **reCAPTCHA v2/v3 and hCaptcha solving** for pages gated by one of these directly (not through Cloudflare) — the same 2Captcha/CapSolver credentials are reused. Unlike Turnstile there's no reusable clearance cookie: each is site-specific, so the extract/crawl response instead surfaces `captcha_challenge` (`"recaptcha_v2"` / `"recaptcha_v3"` / `"hcaptcha"`), `captcha_site_key`, and, once solved, `captcha_token` for the caller to submit to whatever endpoint that page actually expects.
+- **Browser TLS/HTTP2 fingerprint (JA3/JA4) impersonation** for the actual outbound request. Cloudflare fingerprints the TLS ClientHello and HTTP/2 SETTINGS frame before it ever inspects headers, so spoofed `User-Agent`/`sec-ch-ua` headers alone don't help if the handshake underneath still looks like `rustls`. Extraction and crawling requests are instead sent through [`wreq`](https://github.com/0x676e67/wreq), a BoringSSL-backed fork of `reqwest`, emulating a real browser release's TLS + HTTP/2 fingerprint as one coherent bundle. Rather than one fixed profile for every request (itself a fingerprint at volume — real traffic isn't one constant JA3 hash), a small pool of recent Chrome/Firefox/Edge/Safari desktop profiles is used, picked deterministically per proxy lane so a lane's fingerprint stays stable for as long as its cached `cf_clearance` might still be valid, while different lanes tend to land on different profiles. Controlled by `app.browser_impersonation` in `config.yaml` (default `true`); if the impersonating client can't be built, or a request through it fails, it automatically falls back to the plain HTTP client and logs a warning rather than failing the request. Not available on Windows builds (see `src/core/impersonate.rs` for why) — Windows builds transparently use the plain client.
+- Run `RUST_LOG=warn cargo run --example verify_impersonation` to confirm on your own network that impersonated requests are actually going out over BoringSSL rather than silently falling back.
+
+---
+
 ## Model Context Protocol (MCP) Integration
 
 Frontlane SERP includes a native Model Context Protocol (MCP) server over standard I/O for **Claude Desktop**, **Cursor**, **Antigravity**, and **Claude Code**.
@@ -278,7 +310,29 @@ Tools exposed to AI agents:
 - `check_rank`: Domain/subdomain ranking checker.
 - `suggest_keywords`: Autocomplete suggestion generator.
 
-### Claude Desktop Configuration
+### 1-Click Automated Setup (Recommended)
+
+Automatically detect and configure Claude Desktop and Cursor with one command:
+
+```sh
+frontlane-serp mcp install
+```
+
+Check configuration status across installed AI clients:
+
+```sh
+frontlane-serp mcp status
+```
+
+To remove Frontlane SERP from your AI clients:
+
+```sh
+frontlane-serp mcp uninstall
+```
+
+### Manual Configuration
+
+#### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -293,7 +347,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Cursor Configuration
+#### Cursor
 
 Add to `.cursor/mcp.json` or Cursor Settings > MCP:
 
@@ -315,6 +369,12 @@ Add to `.cursor/mcp.json` or Cursor Settings > MCP:
 Query directly from your terminal without starting a server:
 
 ```sh
+# Run environment diagnostics (TLS impersonation, proxies, engine connectivity, MCP)
+frontlane-serp doctor
+
+# 1-Click AI Agent MCP setup
+frontlane-serp mcp install
+
 # Basic search
 frontlane-serp search google "rust async web" --limit 10
 
@@ -339,8 +399,11 @@ frontlane-serp batch-rank --target calljacob.com --file calljacob_keywords.csv -
 # Keyword suggestions
 frontlane-serp suggest "async rust" --engine google
 
-# Domain crawl
-frontlane-serp crawl https://example.com --max-depth 2 --max-pages 10
+# Extract contact info (phone numbers, physical addresses, emails, social profiles)
+frontlane-serp contacts https://example.com
+
+# Crawl site for contact info across about, contact, location, and team pages
+frontlane-serp contacts https://example.com --crawl --max-pages 10 -F markdown -o contacts.md
 
 # Launch MCP server
 frontlane-serp mcp
@@ -389,8 +452,8 @@ Frontlane SERP includes a native, pure-Rust implementation of [FlareProx](https:
 export CLOUDFLARE_API_TOKEN="your_api_token"
 export CLOUDFLARE_ACCOUNT_ID="your_account_id"
 
-# 2. Deploy 3 worker proxy endpoints
-frontlane-serp flareprox create --count 3
+# 2. Deploy 3 worker proxy endpoints (optionally in a specific region, e.g. Germany)
+frontlane-serp flareprox create --count 3 --region de
 
 # 3. List deployed endpoints
 frontlane-serp flareprox list
@@ -413,6 +476,36 @@ Once deployed, you can use any FlareProx worker endpoint directly with `--proxy`
 frontlane-serp search google "rust async web" --proxy https://flareprox-worker.account.workers.dev
 ```
 
+### Cloudflare Edge Deployment (`frontlane-serp edge`)
+
+You can run the entire Frontlane SERP search, RRF fusion, and proxy rotation directly at Cloudflare's Edge, without hosting any local servers.
+
+With a single command, `frontlane-serp edge deploy` will:
+1. Deploy regional FlareProx worker proxies in the specified region (e.g. `--region de`, `--region uk`, `--region us`, `--region jp`).
+2. Deploy the Main Edge SERP Worker running multi-engine search, consensus RRF fusion, and interactive Swagger UI at `/docs`.
+3. Configure the Main Worker with `CF_API_TOKEN` so it can **dynamically create and destroy proxy workers on demand** when rate limits or CAPTCHAs occur.
+
+```bash
+# Deploy full Edge stack: Main SERP Worker + 3 German proxy workers
+frontlane-serp edge deploy --name frontlane-serp-edge --proxies 3 --region de
+
+# Inspect live edge status and proxy pool
+frontlane-serp edge status --name frontlane-serp-edge
+
+# Tear down the edge deployment and all associated FlareProx workers
+frontlane-serp edge destroy --name frontlane-serp-edge
+```
+
+Once deployed, query your edge worker directly:
+```bash
+# Multi-engine search directly on Cloudflare Edge with RRF fusion
+curl "https://frontlane-serp-edge.<account>.workers.dev/mega/search?engines=bing,duckduckgo&text=rust+async"
+
+# Trigger an on-demand proxy recycling cycle via the edge worker
+curl -X POST "https://frontlane-serp-edge.<account>.workers.dev/api/proxies/recycle?count=2&region=de" \
+  -H "Authorization: Bearer <CLOUDFLARE_API_TOKEN>"
+```
+
 ---
 
 ## API Documentation
@@ -431,3 +524,4 @@ Contributions are welcome! Please read [`docs/CONTRIBUTING.md`](./docs/CONTRIBUT
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+</content>

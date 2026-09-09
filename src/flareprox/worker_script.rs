@@ -10,6 +10,16 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   try {
     const url = new URL(request.url);
+
+    // Verify authentication key if API_KEY is defined in Worker environment
+    if (typeof API_KEY !== 'undefined' && API_KEY) {
+      const authHeader = request.headers.get('X-Flareprox-Key') || request.headers.get('x-flareprox-key');
+      const authParam = url.searchParams.get('key');
+      if (authHeader !== API_KEY && authParam !== API_KEY) {
+        return createErrorResponse('Unauthorized', { message: 'Invalid or missing X-Flareprox-Key' }, 401);
+      }
+    }
+
     const targetUrl = getTargetUrl(url, request.headers);
 
     if (!targetUrl) {

@@ -1,5 +1,7 @@
 use crate::core::error::{Result, SerpError};
+use crate::core::impersonate::ImpersonationPool;
 use crate::core::locale::build_accept_language_header;
+use crate::core::proxy::ProxyLaneKey;
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, USER_AGENT,
 };
@@ -41,6 +43,12 @@ pub struct HttpClient {
     default_ua: String,
     platform: BrowserPlatform,
     flareprox_gateway: Option<String>,
+    /// When set, direct (non-flareprox) fetches are routed through a
+    /// browser-impersonating TLS/HTTP2 client from this pool instead of
+    /// `client` above. See `crate::core::impersonate` for why this exists as
+    /// an opt-in overlay rather than the default transport for every caller
+    /// of `HttpClient`, and why it's a pool of profiles rather than one.
+    impersonating: Option<ImpersonationPool>,
 }
 
 impl HttpClient {
@@ -67,8 +75,9 @@ impl HttpClient {
                 if crate::flareprox::is_flareprox_url(p) {
                     flareprox_gateway = Some(crate::flareprox::normalize_flareprox_url(p));
                 } else {
-                    let req_proxy = Proxy::all(p)
-                        .map_err(|e| SerpError::ProxyConnect(format!("invalid proxy URL: {}", e)))?;
+                    let req_proxy = Proxy::all(p).map_err(|e| {
+                        SerpError::ProxyConnect(format!("invalid proxy URL: {}", e))
+                    })?;
                     builder = builder.proxy(req_proxy);
                 }
             }
@@ -111,6 +120,7 @@ impl HttpClient {
             default_ua,
             platform,
             flareprox_gateway,
+            impersonating: None,
         })
     }
 
@@ -121,6 +131,29 @@ impl HttpClient {
 
     pub fn flareprox_gateway(&self) -> Option<&str> {
         self.flareprox_gateway.as_deref()
+    }
+
+    /// Enable browser TLS/HTTP2 fingerprint impersonation for direct (non-
+    /// flareprox) fetches made by this client. `proxy_url`/`insecure`/
+    /// `timeout_secs` mirror the constructor args since each client in the
+    /// pool has its own connection pool and can't share `reqwest`'s.
+    pub fn with_impersonation(
+        mut self,
+        enabled: bool,
+        proxy_url: Option<&str>,
+        insecure: bool,
+        timeout_secs: u64,
+    ) -> Result<Self> {
+        self.impersonating = if enabled {
+            Some(ImpersonationPool::new(proxy_url, insecure, timeout_secs)?)
+        } else {
+            None
+        };
+        Ok(self)
+    }
+
+    pub fn is_impersonating(&self) -> bool {
+        self.impersonating.is_some()
     }
 
     pub fn inner(&self) -> &Client {
@@ -137,7 +170,11 @@ impl HttpClient {
 
     pub async fn get(&self, url: &str) -> reqwest::Result<reqwest::Response> {
         if let Some(ref gateway) = self.flareprox_gateway {
-            self.client.get(gateway).header("X-Target-URL", url).send().await
+            self.client
+                .get(gateway)
+                .header("X-Target-URL", url)
+                .send()
+                .await
         } else {
             self.client.get(url).send().await
         }
@@ -149,7 +186,12 @@ impl HttpClient {
         body: &T,
     ) -> reqwest::Result<reqwest::Response> {
         if let Some(ref gateway) = self.flareprox_gateway {
-            self.client.post(gateway).header("X-Target-URL", url).json(body).send().await
+            self.client
+                .post(gateway)
+                .header("X-Target-URL", url)
+                .json(body)
+                .send()
+                .await
         } else {
             self.client.post(url).json(body).send().await
         }
@@ -186,6 +228,54 @@ impl HttpClient {
             .await
     }
 
+    /// Build the set of extra headers (UA override, cookies, Accept-Language,
+    /// caller-supplied headers) shared by both the direct `reqwest` fetch path
+    /// and the impersonating `wreq` fetch path.
+    fn build_extra_headers(
+        &self,
+        lang: Option<&str>,
+        custom_ua: Option<&str>,
+        cookies: Option<&str>,
+        extra_headers: Option<HeaderMap>,
+    ) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+
+        if let Some(ua) = custom_ua {
+            if !ua.trim().is_empty() {
+                if let Ok(val) = HeaderValue::from_str(ua) {
+                    headers.insert(USER_AGENT, val);
+                }
+            }
+        }
+
+        if let Some(cookie_str) = cookies {
+            if !cookie_str.trim().is_empty() {
+                if let Ok(val) = HeaderValue::from_str(cookie_str) {
+                    headers.insert(COOKIE, val);
+                }
+            }
+        }
+
+        if let Some(l) = lang {
+            let accept_lang = build_accept_language_header(l);
+            if !accept_lang.is_empty() {
+                if let Ok(val) = HeaderValue::from_str(&accept_lang) {
+                    headers.insert(ACCEPT_LANGUAGE, val);
+                }
+            }
+        }
+
+        if let Some(extra) = extra_headers {
+            for (name, value) in extra.iter() {
+                if let Ok(hname) = HeaderName::from_bytes(name.as_ref()) {
+                    headers.insert(hname, value.clone());
+                }
+            }
+        }
+
+        headers
+    }
+
     pub async fn fetch_raw_response(
         &self,
         url: &str,
@@ -194,48 +284,71 @@ impl HttpClient {
         cookies: Option<&str>,
         extra_headers: Option<HeaderMap>,
     ) -> Result<(reqwest::StatusCode, String)> {
-        let (request_url, target_url_header) = if let Some(ref gateway) = self.flareprox_gateway {
-            (gateway.as_str(), Some(url))
-        } else {
-            (url, None)
-        };
+        self.fetch_raw_response_with_lane(url, lang, custom_ua, cookies, extra_headers, None)
+            .await
+    }
 
-        let mut req = self.client.get(request_url);
-        if let Some(target) = target_url_header {
-            req = req.header("X-Target-URL", target);
-        }
+    /// Same as [`Self::fetch_raw_response`], but takes a lane key so that,
+    /// when impersonation is enabled, the browser/OS profile used for this
+    /// request is picked consistently for the lane rather than a fixed
+    /// default. See `crate::core::impersonate::ImpersonationPool` for why.
+    pub async fn fetch_raw_response_with_lane(
+        &self,
+        url: &str,
+        lang: Option<&str>,
+        custom_ua: Option<&str>,
+        cookies: Option<&str>,
+        extra_headers: Option<HeaderMap>,
+        lane_key: Option<&ProxyLaneKey>,
+    ) -> Result<(reqwest::StatusCode, String)> {
+        let headers = self.build_extra_headers(lang, custom_ua, cookies, extra_headers);
 
-        if let Some(ua) = custom_ua {
-            if !ua.trim().is_empty() {
-                if let Ok(val) = HeaderValue::from_str(ua) {
-                    req = req.header(USER_AGENT, val);
-                }
-            }
-        }
-
-        if let Some(cookie_str) = cookies {
-            if !cookie_str.trim().is_empty() {
-                if let Ok(val) = HeaderValue::from_str(cookie_str) {
-                    req = req.header(COOKIE, val);
-                }
-            }
-        }
-
-        if let Some(l) = lang {
-            let accept_lang = build_accept_language_header(l);
-            if !accept_lang.is_empty() {
-                req = req.header(ACCEPT_LANGUAGE, accept_lang);
-            }
-        }
-
-        if let Some(headers) = extra_headers {
+        // The flareprox gateway is our own trusted Cloudflare Worker: our TLS
+        // handshake terminates there, and it performs the actual outbound
+        // fetch to `url` on our behalf, so impersonating a browser fingerprint
+        // on this leg of the connection would have no effect on the leg that
+        // matters. Route it through the plain client either way.
+        if let Some(ref gateway) = self.flareprox_gateway {
+            let mut req = self.client.get(gateway).header("X-Target-URL", url);
             for (name, value) in headers.iter() {
-                if let Ok(hname) = HeaderName::from_bytes(name.as_ref()) {
-                    req = req.header(hname, value.clone());
+                req = req.header(name, value.clone());
+            }
+            let resp = req.send().await?;
+            let status = resp.status();
+            let body = resp.text().await?;
+            return Ok((status, body));
+        }
+
+        if let Some(ref pool) = self.impersonating {
+            let impersonating = pool.client_for(lane_key);
+            match impersonating.fetch_raw_response(url, &headers).await {
+                Ok((status_u16, body)) => {
+                    let status = reqwest::StatusCode::from_u16(status_u16)
+                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+                    return Ok((status, body));
+                }
+                Err(e) => {
+                    // The impersonating client's BoringSSL stack can fail to
+                    // even complete a handshake in some network environments
+                    // (a strict egress proxy that's fine with rustls but
+                    // resets on the ClientHello a browser-emulating library
+                    // sends, for example) where the plain client works fine.
+                    // Fall back rather than hard-failing a request over what
+                    // is meant to be a hardening feature, not a requirement.
+                    tracing::warn!(
+                        error = %e,
+                        url,
+                        profile = impersonating.profile_label(),
+                        "browser impersonation request failed, falling back to plain HTTP client"
+                    );
                 }
             }
         }
 
+        let mut req = self.client.get(url);
+        for (name, value) in headers.iter() {
+            req = req.header(name, value.clone());
+        }
         let resp = req.send().await?;
         let status = resp.status();
         let body = resp.text().await?;
@@ -250,6 +363,31 @@ impl HttpClient {
         custom_ua: Option<&str>,
         cookies: Option<&str>,
         extra_headers: Option<HeaderMap>,
+    ) -> Result<(reqwest::StatusCode, String)> {
+        self.fetch_raw_response_with_proxy_and_lane(
+            url,
+            proxy_override,
+            lang,
+            custom_ua,
+            cookies,
+            extra_headers,
+            None,
+        )
+        .await
+    }
+
+    /// Same as [`Self::fetch_raw_response_with_proxy`], but takes a lane key
+    /// (see [`Self::fetch_raw_response_with_lane`]).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn fetch_raw_response_with_proxy_and_lane(
+        &self,
+        url: &str,
+        proxy_override: Option<&str>,
+        lang: Option<&str>,
+        custom_ua: Option<&str>,
+        cookies: Option<&str>,
+        extra_headers: Option<HeaderMap>,
+        lane_key: Option<&ProxyLaneKey>,
     ) -> Result<(reqwest::StatusCode, String)> {
         if let Some(p) = proxy_override {
             let clean = p.trim();
@@ -295,7 +433,7 @@ impl HttpClient {
             }
         }
 
-        self.fetch_raw_response(url, lang, custom_ua, cookies, extra_headers)
+        self.fetch_raw_response_with_lane(url, lang, custom_ua, cookies, extra_headers, lane_key)
             .await
     }
 }

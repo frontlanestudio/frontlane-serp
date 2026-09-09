@@ -40,7 +40,7 @@ pub struct ServerConfig {
     pub verbose: bool,
     #[serde(default)]
     pub raw_requests: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub insecure: bool,
 }
 
@@ -52,7 +52,7 @@ impl Default for ServerConfig {
             debug: false,
             verbose: false,
             raw_requests: false,
-            insecure: true,
+            insecure: false,
         }
     }
 }
@@ -67,6 +67,10 @@ fn default_port() -> u16 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +99,14 @@ pub struct GeneralAppConfig {
     pub idle_ttl: String,
     #[serde(default = "default_mega_timeout")]
     pub mega_timeout: String,
+    /// Route page extraction and crawling requests through a browser TLS/
+    /// HTTP2 fingerprint (JA3/JA4) impersonation client instead of the
+    /// default `reqwest`/rustls stack. This is what actually keeps Cloudflare
+    /// and similar WAFs from fingerprinting us as a bot at the handshake
+    /// level; the header spoofing alone (sec-ch-ua, User-Agent, ...) is not
+    /// enough on its own. Search engine scraping is unaffected either way.
+    #[serde(default = "default_true")]
+    pub browser_impersonation: bool,
 }
 
 impl Default for GeneralAppConfig {
@@ -112,6 +124,7 @@ impl Default for GeneralAppConfig {
             max_processes: default_max_processes(),
             idle_ttl: default_idle_ttl(),
             mega_timeout: default_mega_timeout(),
+            browser_impersonation: true,
         }
     }
 }

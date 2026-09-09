@@ -3,6 +3,7 @@ use crate::core::types::{Envelope, ImageEnvelope, OutputFormat};
 pub fn render_envelope(env: &Envelope, format: OutputFormat) -> String {
     match format {
         OutputFormat::Json => serde_json::to_string_pretty(env).unwrap_or_default(),
+        OutputFormat::Csv => render_csv(env),
         OutputFormat::Markdown => render_markdown(env),
         OutputFormat::Text => render_text(env),
         OutputFormat::Ndjson => render_ndjson(env),
@@ -12,6 +13,7 @@ pub fn render_envelope(env: &Envelope, format: OutputFormat) -> String {
 pub fn render_image_envelope(env: &ImageEnvelope, format: OutputFormat) -> String {
     match format {
         OutputFormat::Json => serde_json::to_string_pretty(env).unwrap_or_default(),
+        OutputFormat::Csv => render_csv_image(env),
         OutputFormat::Markdown => render_markdown_image(env),
         OutputFormat::Text => render_text_image(env),
         OutputFormat::Ndjson => render_ndjson_image(env),
@@ -218,6 +220,52 @@ pub fn render_ndjson_image(env: &ImageEnvelope) -> String {
         let line = serde_json::json!({ "type": "result", "data": r });
         b.push_str(&line.to_string());
         b.push('\n');
+    }
+    b
+}
+
+fn escape_csv_field(val: &str) -> String {
+    if val.contains(',') || val.contains('"') || val.contains('\n') || val.contains('\r') {
+        let escaped = val.replace('"', "\"\"");
+        format!("\"{}\"", escaped)
+    } else {
+        val.to_string()
+    }
+}
+
+pub fn render_csv(env: &Envelope) -> String {
+    let mut b = String::new();
+    b.push_str("rank,title,url,display_url,domain,engine,snippet,result_type\n");
+    for r in &env.results {
+        b.push_str(&format!(
+            "{},{},{},{},{},{},{},{}\n",
+            r.rank,
+            escape_csv_field(&r.title),
+            escape_csv_field(&r.url),
+            escape_csv_field(&r.display_url),
+            escape_csv_field(&r.domain),
+            escape_csv_field(&r.engine),
+            escape_csv_field(&r.snippet),
+            escape_csv_field(&format!("{:?}", r.result_type)),
+        ));
+    }
+    b
+}
+
+pub fn render_csv_image(env: &ImageEnvelope) -> String {
+    let mut b = String::new();
+    b.push_str("rank,title,image_url,page_url,domain,width,height\n");
+    for (i, r) in env.results.iter().enumerate() {
+        b.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            i + 1,
+            escape_csv_field(&r.title),
+            escape_csv_field(&r.image.url),
+            escape_csv_field(&r.source.page_url),
+            escape_csv_field(&r.source.domain),
+            r.image.width.unwrap_or(0),
+            r.image.height.unwrap_or(0),
+        ));
     }
     b
 }

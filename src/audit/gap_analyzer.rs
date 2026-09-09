@@ -87,7 +87,11 @@ pub fn analyze_gaps(
     }
 
     let avg_word_count = total_words / comp_count;
-    let min_word_count = if min_words == usize::MAX { 0 } else { min_words };
+    let min_word_count = if min_words == usize::MAX {
+        0
+    } else {
+        min_words
+    };
     let exact_title_match_pct = (title_exact_hits as f64 / comp_count as f64) * 100.0;
     let exact_h1_match_pct = (h1_exact_hits as f64 / comp_count as f64) * 100.0;
     let dedicated_slug_pct = (dedicated_slug_hits as f64 / comp_count as f64) * 100.0;
@@ -146,7 +150,10 @@ pub fn analyze_gaps(
 
         for topic in &top_competitor_topics {
             let tl = topic.to_lowercase();
-            if !target_headings_lower.iter().any(|th| th.contains(&tl) || tl.contains(th)) {
+            if !target_headings_lower
+                .iter()
+                .any(|th| th.contains(&tl) || tl.contains(th))
+            {
                 missing_content_outline.push(topic.clone());
             }
         }
@@ -167,7 +174,10 @@ pub fn analyze_gaps(
         // 2. Title Tag Gap
         if !target.title_exact_match {
             score -= 20;
-            quick_wins.push(format!("Place target keyword at beginning of <title>: '<title>{} | [Site Name]</title>'", keyword));
+            quick_wins.push(format!(
+                "Place target keyword at beginning of <title>: '<title>{} | [Site Name]</title>'",
+                keyword
+            ));
             insights.push(GapInsight {
                 category: "Title Tag Alignment".to_string(),
                 severity: "High".to_string(),
@@ -182,7 +192,10 @@ pub fn analyze_gaps(
             });
         } else if !target.title_starts_with_kw {
             score -= 5;
-            quick_wins.push(format!("Move '{}' to the beginning of the <title> tag.", keyword));
+            quick_wins.push(format!(
+                "Move '{}' to the beginning of the <title> tag.",
+                keyword
+            ));
             insights.push(GapInsight {
                 category: "Title Tag Prominence".to_string(),
                 severity: "Medium".to_string(),
@@ -194,8 +207,15 @@ pub fn analyze_gaps(
         // 3. H1 Heading Alignment
         if !target.h1_exact_match {
             score -= 15;
-            quick_wins.push(format!("Update <h1> to match search intent: '<h1>{}</h1>'", keyword));
-            let current_h1 = target.h1.first().cloned().unwrap_or_else(|| "None".to_string());
+            quick_wins.push(format!(
+                "Update <h1> to match search intent: '<h1>{}</h1>'",
+                keyword
+            ));
+            let current_h1 = target
+                .h1
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "None".to_string());
             insights.push(GapInsight {
                 category: "H1 Heading Alignment".to_string(),
                 severity: "High".to_string(),
@@ -231,7 +251,15 @@ pub fn analyze_gaps(
         // 5. Topical & Outline Subtopics Gap
         if !missing_content_outline.is_empty() {
             score -= 10;
-            quick_wins.push(format!("Add missing subtopic sections in H2: {}", missing_content_outline.iter().take(3).cloned().collect::<Vec<_>>().join(", ")));
+            quick_wins.push(format!(
+                "Add missing subtopic sections in H2: {}",
+                missing_content_outline
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
             insights.push(GapInsight {
                 category: "Topical Coverage".to_string(),
                 severity: "Medium".to_string(),
@@ -250,7 +278,10 @@ pub fn analyze_gaps(
         // 6. URL Architecture & Geo-Intent
         if !target.is_dedicated_page && dedicated_slug_pct >= 50.0 {
             score -= 15;
-            quick_wins.push(format!("Deploy a dedicated landing page for this query (e.g. '/{}/')", keyword.trim().replace(' ', "-")));
+            quick_wins.push(format!(
+                "Deploy a dedicated landing page for this query (e.g. '/{}/')",
+                keyword.trim().replace(' ', "-")
+            ));
             insights.push(GapInsight {
                 category: "URL Architecture".to_string(),
                 severity: "High".to_string(),
@@ -266,7 +297,9 @@ pub fn analyze_gaps(
         }
 
         // 7. FAQ & Question Answering
-        if !target.has_faq_schema && (!competitor_questions.is_empty() || faq_schema_adoption_pct >= 30.0) {
+        if !target.has_faq_schema
+            && (!competitor_questions.is_empty() || faq_schema_adoption_pct >= 30.0)
+        {
             score -= 5;
             quick_wins.push("Add an FAQ accordion with FAQPage JSON-LD schema.".to_string());
             insights.push(GapInsight {
@@ -283,7 +316,10 @@ pub fn analyze_gaps(
         // 8. Structured Local Data & Reviews
         if !target.has_local_business_schema && schema_adoption_pct >= 40.0 {
             score -= 5;
-            quick_wins.push("Add JSON-LD LocalBusiness / Organization schema with address and geo-coordinates.".to_string());
+            quick_wins.push(
+                "Add JSON-LD LocalBusiness / Organization schema with address and geo-coordinates."
+                    .to_string(),
+            );
             insights.push(GapInsight {
                 category: "Structured Data".to_string(),
                 severity: "Medium".to_string(),
@@ -314,7 +350,10 @@ pub fn analyze_gaps(
         // 10. Indexability & Canonical Check
         if target.is_noindex {
             score = 0;
-            quick_wins.insert(0, "CRITICAL: Remove 'noindex' robots meta tag immediately!".to_string());
+            quick_wins.insert(
+                0,
+                "CRITICAL: Remove 'noindex' robots meta tag immediately!".to_string(),
+            );
             insights.insert(0, GapInsight {
                 category: "Indexability".to_string(),
                 severity: "Critical".to_string(),
@@ -354,4 +393,3 @@ fn clean_heading(h: &str) -> String {
     let s = s.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == ' ');
     s.to_string()
 }
-

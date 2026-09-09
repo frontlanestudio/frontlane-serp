@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
@@ -106,6 +107,32 @@ pub struct BatchExtractRequest {
     pub use_llms_txt: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ExtractContactsQueryParams {
+    pub url: Option<String>,
+    #[serde(default)]
+    pub crawl: Option<bool>,
+    #[serde(default)]
+    pub max_pages: Option<usize>,
+    #[serde(default)]
+    pub max_depth: Option<usize>,
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExtractContactsPostRequest {
+    pub url: String,
+    #[serde(default)]
+    pub crawl: Option<bool>,
+    #[serde(default)]
+    pub max_pages: Option<usize>,
+    #[serde(default)]
+    pub max_depth: Option<usize>,
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct BatchExtractItem {
     pub page_content: String,
@@ -183,7 +210,9 @@ fn determine_format(params_fmt: Option<&str>, accept_hdr: Option<&str>) -> Outpu
         return OutputFormat::parse(f);
     }
     if let Some(acc) = accept_hdr {
-        if acc.contains("text/markdown") {
+        if acc.contains("text/csv") {
+            return OutputFormat::Csv;
+        } else if acc.contains("text/markdown") {
             return OutputFormat::Markdown;
         } else if acc.contains("text/plain") {
             return OutputFormat::Text;
@@ -200,6 +229,12 @@ fn format_response(env: &Envelope, format: OutputFormat) -> Response {
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
             serde_json::to_string(env).unwrap_or_default(),
+        )
+            .into_response(),
+        OutputFormat::Csv => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            render_envelope(env, OutputFormat::Csv),
         )
             .into_response(),
         OutputFormat::Markdown => (
@@ -229,6 +264,12 @@ fn format_image_response(env: &ImageEnvelope, format: OutputFormat) -> Response 
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
             serde_json::to_string(env).unwrap_or_default(),
+        )
+            .into_response(),
+        OutputFormat::Csv => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            render_image_envelope(env, OutputFormat::Csv),
         )
             .into_response(),
         OutputFormat::Markdown => (
@@ -272,16 +313,87 @@ fn error_response(err: SerpError) -> Response {
         .into_response()
 }
 
-pub async fn root_handler() -> Response {
+const OPENAPI_SPEC: &str = include_str!("../../docs/openapi.yaml");
+
+pub async fn root_handler(headers: HeaderMap) -> Response {
+    if headers
+        .get(header::ACCEPT)
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.contains("text/html"))
+        .unwrap_or(false)
+    {
+        return axum::response::Redirect::temporary("/docs").into_response();
+    }
+
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
         json!({
             "service": "frontlane-serp",
             "version": API_VERSION,
-            "status": "online"
+            "status": "online",
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.yaml"
         })
         .to_string(),
+    )
+        .into_response()
+}
+
+pub async fn openapi_yaml_handler() -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/yaml; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        OPENAPI_SPEC,
+    )
+        .into_response()
+}
+
+pub async fn swagger_ui_handler() -> Response {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Frontlane SERP - API Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>" />
+  <style>
+    body { margin: 0; padding: 0; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .topbar { display: none !important; }
+    .swagger-ui .info { margin: 24px 0; }
+    .swagger-ui .info .title { font-size: 32px; color: #111827; }
+    .swagger-ui .scheme-container { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.yaml',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>"#;
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
     )
         .into_response()
 }
@@ -861,41 +973,51 @@ pub async fn extract_batch_handler(
         proxy_session_id.map(|sid| crate::core::proxy::ProxyLaneKey::new(tenant, "extract", sid));
 
     let use_llms_txt = payload.use_llms_txt.unwrap_or(false);
-    let mut items = Vec::new();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(5));
+    let mut join_set = tokio::task::JoinSet::new();
 
-    for url in &payload.urls {
-        match state
-            .extractor
-            .extract_with_options(
-                url,
-                use_llms_txt,
-                resolved_proxy.as_deref(),
-                lane_key.as_ref(),
-            )
-            .await
-        {
-            Ok(content) => {
-                items.push(BatchExtractItem {
+    for (idx, url) in payload.urls.into_iter().enumerate() {
+        let sem = semaphore.clone();
+        let extractor = state.extractor.clone();
+        let proxy = resolved_proxy.clone();
+        let key = lane_key.clone();
+
+        join_set.spawn(async move {
+            let _permit = sem.acquire().await.ok();
+            let res = extractor
+                .extract_with_options(&url, use_llms_txt, proxy.as_deref(), key.as_ref())
+                .await;
+            (idx, url, res)
+        });
+    }
+
+    let mut indexed_items: Vec<(usize, BatchExtractItem)> = Vec::new();
+    while let Some(res) = join_set.join_next().await {
+        if let Ok((idx, url, extract_res)) = res {
+            let item = match extract_res {
+                Ok(content) => BatchExtractItem {
                     page_content: content.content.unwrap_or_default(),
                     metadata: BatchExtractMetadata {
-                        source: url.clone(),
+                        source: url,
                         title: content.title,
                         error: content.error,
                     },
-                });
-            }
-            Err(e) => {
-                items.push(BatchExtractItem {
+                },
+                Err(e) => BatchExtractItem {
                     page_content: String::new(),
                     metadata: BatchExtractMetadata {
-                        source: url.clone(),
+                        source: url,
                         title: None,
                         error: Some(e.to_string()),
                     },
-                });
-            }
+                },
+            };
+            indexed_items.push((idx, item));
         }
     }
+
+    indexed_items.sort_by_key(|(idx, _)| *idx);
+    let items: Vec<BatchExtractItem> = indexed_items.into_iter().map(|(_, item)| item).collect();
 
     (
         StatusCode::OK,
@@ -916,6 +1038,132 @@ pub async fn crawl_post_handler(
             serde_json::to_string_pretty(&result).unwrap_or_default(),
         )
             .into_response(),
+        Err(e) => error_response(e),
+    }
+}
+
+pub async fn extract_contacts_get_handler(
+    headers: HeaderMap,
+    AxumQuery(params): AxumQuery<ExtractContactsQueryParams>,
+    State(state): State<AppState>,
+) -> Response {
+    let url = match params.url {
+        Some(ref u) if !u.trim().is_empty() => u.trim().to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": "Query parameter 'url' is required" }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let crawl = params.crawl.unwrap_or(false);
+    let max_pages = params.max_pages.unwrap_or(10);
+    let max_depth = params.max_depth.unwrap_or(2);
+
+    match crate::extract::scan_contacts(
+        &state.http_client,
+        &url,
+        crawl,
+        max_pages,
+        max_depth,
+    )
+    .await
+    {
+        Ok(contacts) => {
+            let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
+            let format = determine_format(params.format.as_deref(), accept_header);
+            match format {
+                OutputFormat::Markdown => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+                    contacts.to_markdown(),
+                )
+                    .into_response(),
+                OutputFormat::Csv => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+                    contacts.to_csv(),
+                )
+                    .into_response(),
+                OutputFormat::Text => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    contacts.to_console_text(),
+                )
+                    .into_response(),
+                _ => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                    serde_json::to_string_pretty(&contacts).unwrap_or_default(),
+                )
+                    .into_response(),
+            }
+        }
+        Err(e) => error_response(e),
+    }
+}
+
+pub async fn extract_contacts_post_handler(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(payload): Json<ExtractContactsPostRequest>,
+) -> Response {
+    let url = payload.url.trim().to_string();
+    if url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "Field 'url' is required" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let crawl = payload.crawl.unwrap_or(false);
+    let max_pages = payload.max_pages.unwrap_or(10);
+    let max_depth = payload.max_depth.unwrap_or(2);
+
+    match crate::extract::scan_contacts(
+        &state.http_client,
+        &url,
+        crawl,
+        max_pages,
+        max_depth,
+    )
+    .await
+    {
+        Ok(contacts) => {
+            let accept_header = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
+            let format = determine_format(payload.format.as_deref(), accept_header);
+            match format {
+                OutputFormat::Markdown => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+                    contacts.to_markdown(),
+                )
+                    .into_response(),
+                OutputFormat::Csv => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+                    contacts.to_csv(),
+                )
+                    .into_response(),
+                OutputFormat::Text => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    contacts.to_console_text(),
+                )
+                    .into_response(),
+                _ => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                    serde_json::to_string_pretty(&contacts).unwrap_or_default(),
+                )
+                    .into_response(),
+            }
+        }
         Err(e) => error_response(e),
     }
 }
@@ -1349,6 +1597,17 @@ pub async fn batch_rank_handler(
             json!({ "error": "At least one target item is required" }).to_string(),
         )
             .into_response();
+    }
+
+    if let Some(ref url) = req.webhook_url {
+        if let Err(e) = crate::core::network_guard::validate_public_url(url).await {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": format!("Invalid webhook_url: {}", e) }).to_string(),
+            )
+                .into_response();
+        }
     }
 
     let norm_engine = match req.engine.to_lowercase().as_str() {

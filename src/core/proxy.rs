@@ -111,8 +111,16 @@ impl ProxyManager {
         // 1. Explicit request proxy URL header has highest precedence if allowed
         if state.allow_request_proxy_url {
             if let Some(req_url) = request_proxy_url {
-                if !req_url.trim().is_empty() {
-                    return Some(req_url.to_string());
+                let trimmed = req_url.trim();
+                if !trimmed.is_empty() {
+                    if crate::core::network_guard::validate_public_proxy_url(trimmed)
+                        .await
+                        .is_ok()
+                    {
+                        return Some(trimmed.to_string());
+                    } else {
+                        tracing::warn!(proxy = %trimmed, "blocked unverified or non-public request proxy URL");
+                    }
                 }
             }
         }

@@ -5,8 +5,7 @@ use axum::Router;
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::http_client::HttpClient;
 use frontlane_serp::flareprox::{
-    is_flareprox_url, normalize_flareprox_url, FlareProxConfig, FlareProxError,
-    FLAREPROX_WORKER_JS,
+    is_flareprox_url, normalize_flareprox_url, FlareProxConfig, FlareProxError, FLAREPROX_WORKER_JS,
 };
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -30,7 +29,9 @@ fn test_flareprox_url_detection() {
 
     assert!(!is_flareprox_url("socks5://127.0.0.1:1080"));
     assert!(!is_flareprox_url("http://127.0.0.1:8080"));
-    assert!(!is_flareprox_url("https://residential.proxy-provider.com:8000"));
+    assert!(!is_flareprox_url(
+        "https://residential.proxy-provider.com:8000"
+    ));
 }
 
 #[test]
@@ -64,7 +65,8 @@ fn test_flareprox_config_credentials_resolution() {
     config.account_id = Some("mock_account".to_string());
     let client = config.to_client().unwrap();
     assert_eq!(client.worker_prefix(), "flareprox");
-    assert!(client.generate_worker_name().starts_with("flareprox-"));
+    assert!(client.generate_worker_name(None).starts_with("flareprox-"));
+    assert!(client.generate_worker_name(Some("de")).starts_with("flareprox-de-"));
 }
 
 #[test]
@@ -132,3 +134,45 @@ async fn test_http_client_flareprox_gateway_routing() {
     assert_eq!(status2.as_u16(), 200);
     assert_eq!(body2, "proxied response for https://example.com/test");
 }
+
+#[test]
+fn test_regional_placement_mapping() {
+    use frontlane_serp::flareprox::resolve_placement;
+
+    assert_eq!(resolve_placement("de"), Some("aws:eu-central-1".to_string()));
+    assert_eq!(resolve_placement("germany"), Some("aws:eu-central-1".to_string()));
+    assert_eq!(resolve_placement("frankfurt"), Some("aws:eu-central-1".to_string()));
+    assert_eq!(resolve_placement("uk"), Some("aws:eu-west-2".to_string()));
+    assert_eq!(resolve_placement("gb"), Some("aws:eu-west-2".to_string()));
+    assert_eq!(resolve_placement("london"), Some("aws:eu-west-2".to_string()));
+    assert_eq!(resolve_placement("us"), Some("aws:us-east-1".to_string()));
+    assert_eq!(resolve_placement("jp"), Some("aws:ap-northeast-1".to_string()));
+    assert_eq!(resolve_placement("japan"), Some("aws:ap-northeast-1".to_string()));
+    assert_eq!(resolve_placement("sg"), Some("aws:ap-southeast-1".to_string()));
+    assert_eq!(resolve_placement("singapore"), Some("aws:ap-southeast-1".to_string()));
+    assert_eq!(resolve_placement("au"), Some("aws:ap-southeast-2".to_string()));
+
+    // Passthrough for explicit placement strings
+    assert_eq!(resolve_placement("aws:eu-central-1"), Some("aws:eu-central-1".to_string()));
+    assert_eq!(resolve_placement("gcp:europe-west3"), Some("gcp:europe-west3".to_string()));
+
+    // Unknown region
+    assert_eq!(resolve_placement("mars"), None);
+}
+
+#[test]
+fn test_edge_worker_script_properties() {
+    use frontlane_serp::flareprox::EDGE_WORKER_JS;
+
+    assert!(EDGE_WORKER_JS.contains("frontlane-serp-edge"));
+    assert!(EDGE_WORKER_JS.contains("handleMegaSearch"));
+    assert!(EDGE_WORKER_JS.contains("recycleProxy"));
+    assert!(EDGE_WORKER_JS.contains("SwaggerUIBundle"));
+    assert!(EDGE_WORKER_JS.contains("searchCrates"));
+    assert!(EDGE_WORKER_JS.contains("searchHackerNews"));
+    assert!(EDGE_WORKER_JS.contains("searchWikipedia"));
+    assert!(EDGE_WORKER_JS.contains("searchDuckDuckGo"));
+    assert!(EDGE_WORKER_JS.contains("/api/proxies/recycle"));
+    assert!(EDGE_WORKER_JS.contains("/api/proxies/list"));
+}
+

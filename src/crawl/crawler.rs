@@ -89,6 +89,10 @@ impl Crawler {
         &self.extractor
     }
 
+    pub fn http_client(&self) -> &HttpClient {
+        &self.http_client
+    }
+
     pub async fn crawl(&self, options: CrawlOptions) -> Result<CrawlResult> {
         let start_time = Instant::now();
 
@@ -138,87 +142,116 @@ impl Crawler {
         let max_pages = options.max_pages.clamp(1, 100);
         let max_depth = options.max_depth.min(5);
 
-        while let Some((current_url, depth)) = queue.pop_front() {
-            if pages.len() >= max_pages {
+        let concurrency = options.concurrency.clamp(1, 10);
+
+        while !queue.is_empty() && pages.len() < max_pages {
+            let batch_size = concurrency.min(max_pages.saturating_sub(pages.len()));
+            let mut batch = Vec::new();
+            for _ in 0..batch_size {
+                if let Some(item) = queue.pop_front() {
+                    batch.push(item);
+                } else {
+                    break;
+                }
+            }
+
+            if batch.is_empty() {
                 break;
             }
 
-            // SSRF guard
-            if validate_public_url(&current_url).await.is_err() {
-                continue;
-            }
+            let mut join_set = tokio::task::JoinSet::new();
+            for (current_url, depth) in batch {
+                let client = self.http_client.clone();
+                let robots_clone = robots.clone();
+                let allowed_domains_clone = allowed_domains.clone();
+                let extract_content = options.extract_content;
 
-            // Robots check
-            if let Some(ref r) = robots {
-                if let Ok(u) = Url::parse(&current_url) {
-                    if !r.is_allowed("frontlane-serp", u.path()) {
-                        continue;
+                join_set.spawn(async move {
+                    // SSRF guard
+                    if validate_public_url(&current_url).await.is_err() {
+                        return (current_url, depth, None, Vec::new());
                     }
-                }
-            }
 
-            // Fetch page
-            let (status, body) = match self
-                .http_client
-                .fetch_raw_response(&current_url, None, None, None, None)
-                .await
-            {
-                Ok((st, b)) => (st.as_u16(), b),
-                Err(e) => {
-                    pages.push(CrawledPage {
-                        url: current_url,
-                        depth,
-                        status: 0,
-                        title: None,
-                        content: None,
-                        json_ld: vec![],
-                        meta_tags: HashMap::new(),
-                        links: vec![],
-                        error: Some(e.to_string()),
-                    });
-                    continue;
-                }
-            };
+                    // Robots check
+                    if let Some(ref r) = robots_clone {
+                        if let Ok(u) = Url::parse(&current_url) {
+                            if !r.is_allowed("frontlane-serp", u.path()) {
+                                return (current_url, depth, None, Vec::new());
+                            }
+                        }
+                    }
 
-            let (json_ld, meta_tags) = extract_structured_metadata(&body);
-            let (title, content, discovered_links) = if options.extract_content {
-                let page_data = crate::extract::readability::extract_page_content(&body);
-                let links = extract_links(&current_url, &body, &allowed_domains);
-                (
-                    if !page_data.title.is_empty() {
-                        Some(page_data.title)
+                    // Fetch page
+                    let (status, body) = match client
+                        .fetch_raw_response(&current_url, None, None, None, None)
+                        .await
+                    {
+                        Ok((st, b)) => (st.as_u16(), b),
+                        Err(e) => {
+                            let page = CrawledPage {
+                                url: current_url.clone(),
+                                depth,
+                                status: 0,
+                                title: None,
+                                content: None,
+                                json_ld: vec![],
+                                meta_tags: HashMap::new(),
+                                links: vec![],
+                                error: Some(e.to_string()),
+                            };
+                            return (current_url, depth, Some(page), Vec::new());
+                        }
+                    };
+
+                    let (json_ld, meta_tags) = extract_structured_metadata(&body);
+                    let (title, content, discovered_links) = if extract_content {
+                        let page_data = crate::extract::readability::extract_page_content(&body);
+                        let links = extract_links(&current_url, &body, &allowed_domains_clone);
+                        (
+                            if !page_data.title.is_empty() {
+                                Some(page_data.title)
+                            } else {
+                                None
+                            },
+                            Some(page_data.markdown),
+                            links,
+                        )
                     } else {
-                        None
-                    },
-                    Some(page_data.markdown),
-                    links,
-                )
-            } else {
-                let links = extract_links(&current_url, &body, &allowed_domains);
-                (None, None, links)
-            };
+                        let links = extract_links(&current_url, &body, &allowed_domains_clone);
+                        (None, None, links)
+                    };
 
-            // Enqueue discovered links if within depth
-            if depth < max_depth {
-                for link in &discovered_links {
-                    let norm = normalize_url(link);
-                    if !norm.is_empty() && visited.insert(norm.clone()) {
-                        queue.push_back((norm, depth + 1));
+                    let page = CrawledPage {
+                        url: current_url.clone(),
+                        depth,
+                        status,
+                        title,
+                        content,
+                        json_ld,
+                        meta_tags,
+                        links: discovered_links.clone(),
+                        error: None,
+                    };
+
+                    (current_url, depth, Some(page), discovered_links)
+                });
+            }
+
+            while let Some(res) = join_set.join_next().await {
+                if let Ok((_url, depth, maybe_page, discovered_links)) = res {
+                    if let Some(page) = maybe_page {
+                        pages.push(page);
+                    }
+                    if depth < max_depth {
+                        for link in discovered_links {
+                            let norm = normalize_url(&link);
+                            if !norm.is_empty() && visited.insert(norm.clone()) {
+                                queue.push_back((norm, depth + 1));
+                            }
+                        }
                     }
                 }
             }
-
-            pages.push(CrawledPage {
-                url: current_url,
-                depth,
-                status,
-                title,
-                content,
-                json_ld,
-                meta_tags,
-                links: discovered_links,
-                error: None,
-            });
         }
 
         let took_ms = start_time.elapsed().as_millis() as u64;

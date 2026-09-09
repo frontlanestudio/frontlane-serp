@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible OpenSERP bug.
+description: Report a reproducible Frontlane SERP bug.
 title: "bug: "
 labels: ["bug"]
 body:
@@ -21,20 +21,9 @@ body:
       label: How do we reproduce it?
       description: Include the exact command, request, config, and minimal input.
       placeholder: |
-        1. Run `openserp serve ...`
+        1. Run `frontlane-serp serve`
         2. Request `curl "..."`
         3. See ...
-    validations:
-      required: true
-  - type: dropdown
-    id: mode
-    attributes:
-      label: Retrieval mode
-      options:
-        - browser
-        - raw
-        - both
-        - not sure
     validations:
       required: true
   - type: dropdown
@@ -48,6 +37,10 @@ body:
         - bing
         - duckduckgo
         - ecosia
+        - hackernews
+        - github
+        - crates
+        - wikipedia
         - megasearch
         - not engine-specific
     validations:
@@ -55,17 +48,17 @@ body:
   - type: input
     id: version
     attributes:
-      label: OpenSERP version
-      description: Paste `openserp --version`, the Docker tag, or the commit SHA.
-      placeholder: "0.8.0 / v0.7.15 / commit SHA"
+      label: Frontlane SERP version
+      description: Paste `frontlane-serp --version`, the Docker tag, or the commit SHA.
+      placeholder: "0.1.0 / commit SHA"
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: OS, Go version, Docker/browser version, proxy/captcha setup if relevant.
-      placeholder: "Windows 11, Go 1.24, Docker, Chromium ..."
+      description: OS, Rust version, Docker version, proxy setup if relevant.
+      placeholder: "macOS 15, Rust 1.84, Docker, SOCKS5 proxy..."
     validations:
       required: true
   - type: textarea

@@ -1,5 +1,15 @@
 use crate::core::page_helpers::normalize_whitespace;
+use regex::Regex;
 use scraper::{Html, Selector};
+use std::sync::LazyLock;
+
+static STRIP_TAGS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<noscript\b[^>]*>.*?</noscript>|<svg\b[^>]*>.*?</svg>").unwrap()
+});
+
+fn sanitize_html_for_markdown(html: &str) -> String {
+    STRIP_TAGS_RE.replace_all(html, "").to_string()
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ExtractedPage {
@@ -40,8 +50,11 @@ pub fn extract_page_content(html_str: &str) -> ExtractedPage {
         clean_html = html_str.to_string();
     }
 
+    // Strip script, style, noscript, and svg tags before markdown parsing
+    let sanitized_html = sanitize_html_for_markdown(&clean_html);
+
     // Convert to markdown using html2md
-    let markdown = html2md::parse_html(&clean_html);
+    let markdown = html2md::parse_html(&sanitized_html);
     let normalized_markdown = normalize_whitespace(&markdown);
     let text = normalized_markdown.clone();
 
@@ -84,5 +97,44 @@ fn extract_first_tag(doc: &Html, tag: &str) -> Option<String> {
         Some(t)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_page_content_strips_scripts_and_styles() {
+        let html = r#"
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Test Page</title>
+                <style>body { color: red; } .hidden { display: none; }</style>
+            </head>
+            <body>
+                <main>
+                    <h1>Article Heading</h1>
+                    <script>window.__PRELOADED_DATA__ = { secret: "do_not_leak" };</script>
+                    <p>This is real visible article content.</p>
+                    <noscript><p>JavaScript is required</p></noscript>
+                    <style>.nested { font-size: 14px; }</style>
+                </main>
+            </body>
+            </html>
+        "#;
+
+        let page = extract_page_content(html);
+        assert_eq!(page.title, "Test Page");
+        assert!(page.markdown.contains("Article Heading"));
+        assert!(page
+            .markdown
+            .contains("This is real visible article content."));
+        assert!(!page.markdown.contains("window.__PRELOADED_DATA__"));
+        assert!(!page.markdown.contains("do_not_leak"));
+        assert!(!page.markdown.contains("color: red"));
+        assert!(!page.markdown.contains("JavaScript is required"));
+        assert!(!page.markdown.contains("nested {"));
     }
 }

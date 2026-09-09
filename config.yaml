@@ -8,6 +8,13 @@ server:
 app:
   log_format: text
   timeout: 15
+  # Route page extraction and crawling requests through a browser TLS/HTTP2
+  # fingerprint (JA3/JA4) impersonation client so they aren't distinguishable
+  # from real Chrome at the TLS handshake level (search engine scraping is
+  # unaffected either way). Falls back to the plain HTTP client automatically
+  # if the impersonating client can't be built or a request through it fails.
+  # Not available on Windows builds. See src/core/impersonate.rs.
+  browser_impersonation: true
   browser_path: ''
   profiles: ''
   head: false
@@ -52,6 +59,14 @@ cors:
   allow_methods: GET, POST, OPTIONS
   allow_headers: Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant, X-Use-Profile
   max_age: 86400
+# Same solver/provider/key handles Cloudflare's Turnstile (extraction and
+# crawling requests, resolved automatically into a reusable cf_clearance
+# cookie -- see app.browser_impersonation above) as well as reCAPTCHA v2/v3
+# and hCaptcha challenges detected directly on a page. Provider is
+# "capsolver" or "2captcha" -- unlike Turnstile, a solved reCAPTCHA/hCaptcha
+# token isn't reusable and has to be submitted to whatever the page itself
+# expects; see ExtractedContent.captcha_challenge / .captcha_site_key /
+# .captcha_token in the extract/crawl API response.
 captcha:
   solver_enabled: false
   provider: capsolver

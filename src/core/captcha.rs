@@ -93,10 +93,58 @@ impl Default for CaptchaSolverConfig {
     }
 }
 
+/// A non-Cloudflare CAPTCHA challenge detected on a page, and enough
+/// information to submit it to a solver. Unlike Cloudflare's Turnstile (see
+/// `CaptchaSolver::solve_cloudflare_challenge`), solving one of these
+/// returns a raw response token rather than a reusable cookie: the token
+/// has to be submitted back to whatever endpoint or form the page itself
+/// expects, which varies site to site and isn't something this crate can
+/// generalize -- see `crate::core::types::ExtractedContent::captcha_token`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptchaChallengeKind {
+    RecaptchaV2 {
+        site_key: String,
+    },
+    RecaptchaV3 {
+        site_key: String,
+        /// The `action` parameter the page's own `grecaptcha.execute()` call
+        /// used, when it could be recovered from the page source. Both
+        /// providers accept this being absent, but pass it through when we
+        /// have it since some scoring depends on it matching.
+        action: Option<String>,
+    },
+    HCaptcha {
+        site_key: String,
+    },
+}
+
+impl CaptchaChallengeKind {
+    /// Short machine-readable label, used as `ExtractedContent::captcha_challenge`.
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            CaptchaChallengeKind::RecaptchaV2 { .. } => "recaptcha_v2",
+            CaptchaChallengeKind::RecaptchaV3 { .. } => "recaptcha_v3",
+            CaptchaChallengeKind::HCaptcha { .. } => "hcaptcha",
+        }
+    }
+
+    pub fn site_key(&self) -> &str {
+        match self {
+            CaptchaChallengeKind::RecaptchaV2 { site_key } => site_key,
+            CaptchaChallengeKind::RecaptchaV3 { site_key, .. } => site_key,
+            CaptchaChallengeKind::HCaptcha { site_key } => site_key,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CaptchaSolver {
     pub config: CaptchaSolverConfig,
     pub mock_solution: Option<CloudflareClearance>,
+    /// Mock token for `solve_third_party_captcha`, mirroring `mock_solution`
+    /// for Cloudflare -- lets tests exercise the reCAPTCHA/hCaptcha path
+    /// without a live provider call.
+    pub mock_third_party_token: Option<String>,
 }
 
 impl CaptchaSolver {
@@ -104,6 +152,7 @@ impl CaptchaSolver {
         Self {
             config,
             mock_solution: None,
+            mock_third_party_token: None,
         }
     }
 
@@ -113,9 +162,17 @@ impl CaptchaSolver {
         self
     }
 
+    pub fn with_mock_third_party_token(mut self, token: impl Into<String>) -> Self {
+        self.mock_third_party_token = Some(token.into());
+        self.config.enabled = true;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
-            && (self.mock_solution.is_some() || !self.config.api_key.trim().is_empty())
+            && (self.mock_solution.is_some()
+                || self.mock_third_party_token.is_some()
+                || !self.config.api_key.trim().is_empty())
     }
 
     pub async fn solve_cloudflare_challenge(
@@ -402,6 +459,321 @@ impl CaptchaSolver {
             url
         )))
     }
+
+    /// Solve a reCAPTCHA v2/v3 or hCaptcha challenge detected on a page (see
+    /// `crate::extract::detect_third_party_captcha`), returning the raw
+    /// response token. Unlike `solve_cloudflare_challenge`, there's no
+    /// cookie to cache and replay -- the caller is responsible for
+    /// submitting the token to whatever the target page expects.
+    pub async fn solve_third_party_captcha(
+        &self,
+        url: &str,
+        challenge: &CaptchaChallengeKind,
+        proxy_url: Option<&str>,
+    ) -> Result<String> {
+        record_solver_attempt();
+
+        if let Some(ref token) = self.mock_third_party_token {
+            record_solver_success();
+            return Ok(token.clone());
+        }
+
+        let api_key = self.config.api_key.trim();
+        if api_key.is_empty() {
+            record_solver_failure();
+            return Err(SerpError::ChallengeSolver(
+                "Captcha API key not configured for solver".to_string(),
+            ));
+        }
+
+        let provider = self.config.provider.to_lowercase();
+        match provider.as_str() {
+            "capsolver" => {
+                self.solve_third_party_with_capsolver(url, challenge, proxy_url)
+                    .await
+            }
+            _ => {
+                self.solve_third_party_with_2captcha(url, challenge, proxy_url)
+                    .await
+            }
+        }
+    }
+
+    async fn solve_third_party_with_capsolver(
+        &self,
+        url: &str,
+        challenge: &CaptchaChallengeKind,
+        proxy_url: Option<&str>,
+    ) -> Result<String> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                self.config.max_poll_timeout_secs,
+            ))
+            .build()?;
+
+        let has_proxy = proxy_url.map(|p| !p.trim().is_empty()).unwrap_or(false);
+
+        let mut task_payload = match challenge {
+            CaptchaChallengeKind::RecaptchaV2 { site_key } => serde_json::json!({
+                "type": if has_proxy { "ReCaptchaV2Task" } else { "ReCaptchaV2TaskProxyLess" },
+                "websiteURL": url,
+                "websiteKey": site_key,
+            }),
+            CaptchaChallengeKind::RecaptchaV3 { site_key, action } => {
+                let mut payload = serde_json::json!({
+                    "type": if has_proxy { "ReCaptchaV3Task" } else { "ReCaptchaV3TaskProxyLess" },
+                    "websiteURL": url,
+                    "websiteKey": site_key,
+                });
+                if let Some(a) = action {
+                    payload["pageAction"] = serde_json::json!(a);
+                }
+                payload
+            }
+            CaptchaChallengeKind::HCaptcha { site_key } => serde_json::json!({
+                "type": if has_proxy { "HCaptchaTask" } else { "HCaptchaTaskProxyLess" },
+                "websiteURL": url,
+                "websiteKey": site_key,
+            }),
+        };
+
+        if has_proxy {
+            if let Some(p) = proxy_url {
+                task_payload["proxy"] = serde_json::json!(p);
+            }
+        }
+
+        let create_task_res = client
+            .post("https://api.capsolver.com/createTask")
+            .json(&serde_json::json!({
+                "clientKey": self.config.api_key,
+                "task": task_payload
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                record_solver_failure();
+                SerpError::ChallengeSolver(format!("CapSolver network error: {}", e))
+            })?;
+
+        let create_json: serde_json::Value = create_task_res.json().await.map_err(|e| {
+            record_solver_failure();
+            SerpError::ChallengeSolver(format!("Failed to parse CapSolver task response: {}", e))
+        })?;
+
+        if let Some(err_code) = create_json.get("errorCode").and_then(|v| v.as_str()) {
+            if !err_code.is_empty() && err_code != "0" {
+                record_solver_failure();
+                let desc = create_json
+                    .get("errorDescription")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(err_code);
+                return Err(SerpError::ChallengeSolver(format!(
+                    "CapSolver error: {}",
+                    desc
+                )));
+            }
+        }
+
+        let task_id = create_json
+            .get("taskId")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                record_solver_failure();
+                SerpError::ChallengeSolver("No taskId returned by CapSolver".to_string())
+            })?;
+
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(self.config.max_poll_timeout_secs);
+        let poll_interval = std::time::Duration::from_millis(self.config.poll_interval_ms);
+
+        while start.elapsed() < timeout {
+            tokio::time::sleep(poll_interval).await;
+
+            let result_res = client
+                .post("https://api.capsolver.com/getTaskResult")
+                .json(&serde_json::json!({
+                    "clientKey": self.config.api_key,
+                    "taskId": task_id
+                }))
+                .send()
+                .await;
+
+            let Ok(res) = result_res else {
+                continue;
+            };
+            let Ok(res_json) = res.json::<serde_json::Value>().await else {
+                continue;
+            };
+
+            let status = res_json
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if status == "ready" {
+                let solution = res_json.get("solution").ok_or_else(|| {
+                    record_solver_failure();
+                    SerpError::ChallengeSolver(
+                        "Missing solution object in CapSolver response".to_string(),
+                    )
+                })?;
+
+                // The documented field is `gRecaptchaResponse` for all three
+                // task families, but fall back defensively to a couple of
+                // alternates seen in practice rather than hard-failing on a
+                // naming mismatch we can't verify without a live account.
+                let token = solution
+                    .get("gRecaptchaResponse")
+                    .or_else(|| solution.get("token"))
+                    .or_else(|| solution.get("captchaKey"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(t) = token {
+                    if !t.is_empty() {
+                        record_solver_success();
+                        return Ok(t.to_string());
+                    }
+                }
+            } else if status == "failed" {
+                record_solver_failure();
+                return Err(SerpError::ChallengeSolver(
+                    "CapSolver reported task failure".to_string(),
+                ));
+            }
+        }
+
+        record_solver_failure();
+        Err(SerpError::ChallengeSolver(format!(
+            "CapSolver timed out solving challenge for {}",
+            url
+        )))
+    }
+
+    async fn solve_third_party_with_2captcha(
+        &self,
+        url: &str,
+        challenge: &CaptchaChallengeKind,
+        proxy_url: Option<&str>,
+    ) -> Result<String> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                self.config.max_poll_timeout_secs,
+            ))
+            .build()?;
+
+        let mut form_params: Vec<(&str, String)> = vec![
+            ("key", self.config.api_key.clone()),
+            ("pageurl", url.to_string()),
+            ("json", "1".to_string()),
+        ];
+
+        match challenge {
+            CaptchaChallengeKind::RecaptchaV2 { site_key } => {
+                form_params.push(("method", "userrecaptcha".to_string()));
+                form_params.push(("googlekey", site_key.clone()));
+            }
+            CaptchaChallengeKind::RecaptchaV3 { site_key, action } => {
+                form_params.push(("method", "userrecaptcha".to_string()));
+                form_params.push(("version", "v3".to_string()));
+                form_params.push(("googlekey", site_key.clone()));
+                form_params.push((
+                    "action",
+                    action.clone().unwrap_or_else(|| "verify".to_string()),
+                ));
+                form_params.push(("min_score", "0.3".to_string()));
+            }
+            CaptchaChallengeKind::HCaptcha { site_key } => {
+                form_params.push(("method", "hcaptcha".to_string()));
+                form_params.push(("sitekey", site_key.clone()));
+            }
+        }
+
+        if let Some(p) = proxy_url {
+            if !p.trim().is_empty() {
+                form_params.push(("proxy", p.to_string()));
+                form_params.push(("proxytype", "HTTP".to_string()));
+            }
+        }
+
+        let form_refs: Vec<(&str, &str)> =
+            form_params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+        let in_res = client
+            .post("https://2captcha.com/in.php")
+            .form(&form_refs)
+            .send()
+            .await
+            .map_err(|e| {
+                record_solver_failure();
+                SerpError::ChallengeSolver(format!("2Captcha network error: {}", e))
+            })?;
+
+        let in_json: serde_json::Value = in_res.json().await.map_err(|e| {
+            record_solver_failure();
+            SerpError::ChallengeSolver(format!("Failed to parse 2Captcha response: {}", e))
+        })?;
+
+        if in_json.get("status").and_then(|v| v.as_i64()) != Some(1) {
+            record_solver_failure();
+            let err = in_json
+                .get("request")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNKNOWN_ERROR");
+            return Err(SerpError::ChallengeSolver(format!(
+                "2Captcha submission error: {}",
+                err
+            )));
+        }
+
+        let request_id = in_json
+            .get("request")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                record_solver_failure();
+                SerpError::ChallengeSolver("No request ID from 2Captcha".to_string())
+            })?;
+
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(self.config.max_poll_timeout_secs);
+        let poll_interval = std::time::Duration::from_millis(self.config.poll_interval_ms);
+
+        while start.elapsed() < timeout {
+            tokio::time::sleep(poll_interval).await;
+
+            let poll_url = format!(
+                "https://2captcha.com/res.php?key={}&action=get&id={}&json=1",
+                self.config.api_key, request_id
+            );
+
+            let Ok(res) = client.get(&poll_url).send().await else {
+                continue;
+            };
+            let Ok(res_json) = res.json::<serde_json::Value>().await else {
+                continue;
+            };
+
+            if res_json.get("status").and_then(|v| v.as_i64()) == Some(1) {
+                if let Some(token) = res_json.get("request").and_then(|v| v.as_str()) {
+                    record_solver_success();
+                    return Ok(token.to_string());
+                }
+            } else if let Some(req_status) = res_json.get("request").and_then(|v| v.as_str()) {
+                if req_status != "CAPCHA_NOT_READY" {
+                    record_solver_failure();
+                    return Err(SerpError::ChallengeSolver(format!(
+                        "2Captcha error: {}",
+                        req_status
+                    )));
+                }
+            }
+        }
+
+        record_solver_failure();
+        Err(SerpError::ChallengeSolver(format!(
+            "2captcha solver timed out solving challenge for {}",
+            url
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -426,5 +798,55 @@ mod tests {
     fn test_cloudflare_clearance_expiration() {
         let clearance = CloudflareClearance::new("example.com", "cookie123", "UA", 100, None);
         assert!(!clearance.is_expired());
+    }
+
+    #[test]
+    fn test_challenge_kind_str_and_site_key() {
+        let v2 = CaptchaChallengeKind::RecaptchaV2 {
+            site_key: "6Le-key".to_string(),
+        };
+        assert_eq!(v2.kind_str(), "recaptcha_v2");
+        assert_eq!(v2.site_key(), "6Le-key");
+
+        let v3 = CaptchaChallengeKind::RecaptchaV3 {
+            site_key: "6Le-key-v3".to_string(),
+            action: Some("login".to_string()),
+        };
+        assert_eq!(v3.kind_str(), "recaptcha_v3");
+        assert_eq!(v3.site_key(), "6Le-key-v3");
+
+        let hc = CaptchaChallengeKind::HCaptcha {
+            site_key: "hc-key".to_string(),
+        };
+        assert_eq!(hc.kind_str(), "hcaptcha");
+        assert_eq!(hc.site_key(), "hc-key");
+    }
+
+    #[tokio::test]
+    async fn test_solve_third_party_captcha_uses_mock() {
+        let solver = CaptchaSolver::new(CaptchaSolverConfig::default())
+            .with_mock_third_party_token("mock-token-123");
+        assert!(solver.is_enabled());
+
+        let challenge = CaptchaChallengeKind::RecaptchaV2 {
+            site_key: "any-site-key".to_string(),
+        };
+        let token = solver
+            .solve_third_party_captcha("https://example.com/gated", &challenge, None)
+            .await
+            .unwrap();
+        assert_eq!(token, "mock-token-123");
+    }
+
+    #[tokio::test]
+    async fn test_solve_third_party_captcha_no_api_key_fails() {
+        let solver = CaptchaSolver::new(CaptchaSolverConfig::default());
+        let challenge = CaptchaChallengeKind::HCaptcha {
+            site_key: "any-site-key".to_string(),
+        };
+        let result = solver
+            .solve_third_party_captcha("https://example.com/gated", &challenge, None)
+            .await;
+        assert!(result.is_err());
     }
 }

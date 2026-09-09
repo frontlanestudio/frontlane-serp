@@ -1,53 +1,34 @@
 # Good First Issue Backlog
 
-Small, contributor-friendly tasks curated from the OSS roadmap. The first section
-tracks issues that are **already filed** on GitHub with the `good first issue`
-label. The second section is a backlog of vetted ideas that are **not yet filed** —
-open one (or ask a maintainer to) before starting work so effort isn't duplicated.
+Welcome! If you're looking to contribute to **Frontlane SERP**, these issues and roadmap ideas are great places to start.
 
-New contributor? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first; new engines start
-with [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
+Before getting started:
+- Read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Adding a new search engine? Check [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
 
-## Open starter issues
+---
 
-### [#27 Add CLI validation tests for supported engines](https://github.com/karust/openserp/issues/27)
+## Suggested Starter Tasks
 
-Area: CLI, tests
+### 1. Brave Search Engine
+- **Area**: New engine (`src/engines/brave/` or `src/engines/brave.rs`).
+- **Goal**: Add initial HTML parsing and mock fixture tests for Brave Search results.
+- **Guide**: Follow [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
 
-Make the unknown-engine error list valid engine names, then add a table test for
-engine dispatch in both modes: browser mode accepts all six engines (`google`,
-`yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`); raw mode accepts
-`google/yandex/baidu/ecosia` and rejects `bing`/`duckduckgo` with a clear message.
-Both dispatch switches live in [`cmd/search.go`](../cmd/search.go).
+### 2. Live Smoke-Check Script
+- **Area**: Release tooling (`scripts/smoke-check.sh`).
+- **Goal**: Write an automated test script that builds the release binary, starts `frontlane-serp serve`, polls `/health` until ready, issues test queries to `localhost:7000`, and cleanly shuts down.
 
-### [#30 Document raw-mode support per engine](https://github.com/karust/openserp/issues/30)
+### 3. OpenSearch Engine Plugin Definition
+- **Area**: Extensibility (`src/engines/`).
+- **Goal**: Support declarative engines via OpenSearch XML description autodiscovery.
 
-Area: docs
+### 4. Result Cache Enhancements
+- **Area**: Core cache (`src/core/cache.rs`).
+- **Goal**: Add cache hit/miss statistics and configurable Redis backend support alongside Moka memory cache.
 
-Add a small table showing which engines support browser mode, raw mode, and
-`/{engine}/parse`. The table must match current code; link it from the README
-search-endpoint section. Start in `cmd/serve.go` and `README.md`.
+---
 
-### [#31 Add release smoke-check script stub](https://github.com/karust/openserp/issues/31)
+## Getting Help
 
-Area: release tooling
-
-Add a script under `scripts/` (e.g. `scripts/smoke-check.sh`) that builds the
-binary, starts the server, polls `/health` until ready, then shuts down and exits
-cleanly. It must fail fast with a non-zero exit when the server does not become
-healthy. Docker and `go install` checks are follow-ups. Document it in
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Backlog
-
-These are good candidates from the roadmap but have **no GitHub issue yet**. File
-one before starting.
-
-### Draft a Brave Search engine skeleton
-
-Area: new engine
-
-Create a non-registered `brave/` package skeleton with URL builder table tests and
-a minimal parser fixture (title, URL, snippet). Leave live browser search for a
-follow-up. Do not expose the engine in README or API docs until browser search
-works. See [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
+Feel free to open an issue or pull request with a draft/WIP prefix if you would like feedback on your implementation!

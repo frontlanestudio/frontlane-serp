@@ -3,8 +3,9 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
-    AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, CrawlArgs, ExtractArgs, FlareproxAction,
-    FlareproxArgs, RankArgs, SearchArgs, SuggestArgs,
+    AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, ContactsArgs, CrawlArgs,
+    ExtractArgs, FlareproxAction, FlareproxArgs, McpAction, RankArgs, SearchArgs,
+    SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -29,7 +30,7 @@ use frontlane_serp::suggest::SuggestClient;
 fn to_output_format(fmt: CliFormat) -> OutputFormat {
     match fmt {
         CliFormat::Json => OutputFormat::Json,
-        CliFormat::Csv => OutputFormat::Text,
+        CliFormat::Csv => OutputFormat::Csv,
         CliFormat::Markdown => OutputFormat::Markdown,
         CliFormat::Text => OutputFormat::Text,
         CliFormat::Ndjson => OutputFormat::Ndjson,
@@ -85,7 +86,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.insecure,
         config.app.timeout,
     )?;
-    let engines = build_all_engines(&http_client);
+    let scraping_http_client = http_client
+        .clone()
+        .with_impersonation(
+            config.app.browser_impersonation,
+            config.proxies.global.as_deref(),
+            config.server.insecure,
+            config.app.timeout,
+        )
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                error = %e,
+                "failed to initialize browser impersonation client, falling back to plain HTTP client"
+            );
+            http_client.clone()
+        });
+
+    let engines = build_all_engines(&scraping_http_client);
 
     match cli.command {
         Some(Commands::Serve(serve_args)) => {
@@ -98,10 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_server(config, engines, http_client).await?;
         }
         Some(Commands::Search(search_args)) => {
-            handle_search(&search_args, &engines, &http_client).await?;
+            handle_search(&search_args, &engines, &scraping_http_client).await?;
         }
         Some(Commands::Extract(extract_args)) => {
-            handle_extract(&extract_args, &http_client).await?;
+            handle_extract(&extract_args, &scraping_http_client).await?;
         }
         Some(Commands::Rank(rank_args)) => {
             handle_rank(&rank_args, &engines).await?;
@@ -110,19 +127,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             handle_suggest(&suggest_args, &http_client).await?;
         }
         Some(Commands::Crawl(crawl_args)) => {
-            handle_crawl(&crawl_args, &http_client).await?;
+            handle_crawl(&crawl_args, &scraping_http_client).await?;
         }
         Some(Commands::BatchRank(batch_args)) => {
-            handle_batch_rank(&batch_args, &engines, &http_client).await?;
+            handle_batch_rank(&batch_args, &engines, &scraping_http_client).await?;
         }
         Some(Commands::Audit(audit_args)) => {
-            handle_audit(&audit_args, &engines, &http_client).await?;
+            handle_audit(&audit_args, &engines, &scraping_http_client).await?;
         }
-        Some(Commands::Mcp) => {
-            handle_mcp(&engines, &http_client).await?;
+        Some(Commands::Contacts(contacts_args)) => {
+            handle_contacts(&contacts_args, &scraping_http_client).await?;
         }
+        Some(Commands::Doctor(doctor_args)) => {
+            let opts = frontlane_serp::cli::doctor::DoctorOptions {
+                skip_engines: doctor_args.skip_engines,
+                specific_engine: doctor_args.engine,
+            };
+            frontlane_serp::cli::doctor::run_doctor(&config, &engines, &scraping_http_client, opts).await?;
+        }
+        Some(Commands::Mcp(mcp_args)) => match mcp_args.action {
+            Some(McpAction::Install { client }) => {
+                frontlane_serp::mcp::install_mcp(&client)?;
+            }
+            Some(McpAction::Status) => {
+                frontlane_serp::mcp::status_mcp()?;
+            }
+            Some(McpAction::Uninstall { client }) => {
+                frontlane_serp::mcp::uninstall_mcp(&client)?;
+            }
+            None | Some(McpAction::Serve) => {
+                handle_mcp(&engines, &http_client, &scraping_http_client).await?;
+            }
+        },
         Some(Commands::Flareprox(flare_args)) => {
             handle_flareprox(&flare_args, &config).await?;
+        }
+        Some(Commands::Edge(edge_args)) => {
+            handle_edge(&edge_args, &config).await?;
         }
         None => {
             // Default action: start server
@@ -136,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_search(
     args: &SearchArgs,
     engines: &[Arc<dyn SearchEngine>],
-    http_client: &HttpClient,
+    scraping_http_client: &HttpClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let norm_engine = match args.engine.to_lowercase().as_str() {
         "ddg" | "duck" => "duckduckgo".to_string(),
@@ -172,7 +213,7 @@ async fn handle_search(
     };
 
     let format = to_output_format(args.format);
-    let extractor = Extractor::new(http_client.clone());
+    let extractor = Extractor::new(scraping_http_client.clone());
 
     if norm_engine == "mega" {
         let mega = MegaSearcher::new(engines.to_vec(), Some(extractor));
@@ -292,6 +333,7 @@ async fn handle_rank(
     let match_mode = match args.r#match.as_str() {
         "exact" => DomainMatchMode::Exact,
         "wildcard" => DomainMatchMode::Wildcard,
+        "directory" => DomainMatchMode::Directory,
         _ => DomainMatchMode::Subdomain,
     };
 
@@ -336,16 +378,39 @@ async fn handle_rank(
             );
         }
 
+        if resp.directory_count > 0 || args.directories {
+            let top_dirs = if resp.ranking_directories.is_empty() {
+                "None".to_string()
+            } else {
+                resp.ranking_directories.join(", ")
+            };
+            println!(
+                "📁 Directory Dominance: {}/{} results ({:.1}%) — {}",
+                resp.directory_count,
+                resp.serp_results.len(),
+                resp.directory_share_pct,
+                top_dirs
+            );
+        }
+
         if !resp.serp_results.is_empty() {
             println!("\nTop SERP Results ({}):", resp.serp_results.len());
             for res in &resp.serp_results {
                 let badge = if res.is_target { " 🎯 [TARGET]" } else { "" };
+                let dir_badge = if res.is_directory {
+                    " 📁 [DIRECTORY]"
+                } else {
+                    ""
+                };
                 let domain_str = res
                     .domain
                     .as_deref()
                     .map(|d| format!(" ({})", d))
                     .unwrap_or_default();
-                println!("  #{}: {} - {}{}{}", res.rank, res.url, res.title, domain_str, badge);
+                println!(
+                    "  #{}: {} - {}{}{}{}",
+                    res.rank, res.url, res.title, domain_str, badge, dir_badge
+                );
             }
         }
     }
@@ -409,6 +474,49 @@ async fn handle_audit(
     Ok(())
 }
 
+async fn handle_contacts(
+    args: &ContactsArgs,
+    http_client: &HttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!(
+        "📞 Scanning contacts for '{}' (crawl: {}, max_pages: {})...",
+        args.url, args.crawl, args.max_pages
+    );
+
+    let contacts = frontlane_serp::extract::scan_contacts(
+        http_client,
+        &args.url,
+        args.crawl,
+        args.max_pages,
+        args.max_depth,
+    )
+    .await
+    .map_err(|e| format!("{e}"))?;
+
+    let output_str = match args.format {
+        CliFormat::Json => serde_json::to_string_pretty(&contacts)?,
+        CliFormat::Csv => contacts.to_csv(),
+        CliFormat::Markdown => contacts.to_markdown(),
+        CliFormat::Text | CliFormat::Ndjson => contacts.to_console_text(),
+    };
+
+    if let Some(ref out_path) = args.output {
+        let content_to_write = if out_path.ends_with(".csv") {
+            contacts.to_csv()
+        } else if out_path.ends_with(".md") {
+            contacts.to_markdown()
+        } else {
+            serde_json::to_string_pretty(&contacts)?
+        };
+        tokio::fs::write(out_path, content_to_write).await?;
+        eprintln!("✅ Saved contacts report to '{}'.", out_path);
+    }
+
+    println!("{}", output_str);
+
+    Ok(())
+}
+
 async fn handle_suggest(
     args: &SuggestArgs,
     http_client: &HttpClient,
@@ -434,19 +542,20 @@ async fn handle_suggest(
 async fn handle_mcp(
     engines: &[Arc<dyn SearchEngine>],
     http_client: &HttpClient,
+    scraping_http_client: &HttpClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut engine_map = std::collections::HashMap::new();
     for e in engines {
         engine_map.insert(e.name().to_string(), e.clone());
     }
-    let extractor = Arc::new(Extractor::new(http_client.clone()));
+    let extractor = Arc::new(Extractor::new(scraping_http_client.clone()));
     let mega = Arc::new(MegaSearcher::new(
         engines.to_vec(),
         Some((*extractor).clone()),
     ));
     let suggest = SuggestClient::new(http_client.clone());
     let crawler = Arc::new(frontlane_serp::crawl::Crawler::new(
-        http_client.clone(),
+        scraping_http_client.clone(),
         extractor.clone(),
     ));
 
@@ -538,6 +647,12 @@ struct BatchRankResultItem {
     timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(default)]
+    directory_count: usize,
+    #[serde(default)]
+    directory_share_pct: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    top_directories: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     serp_results: Vec<frontlane_serp::rank::SerpRankResultItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -637,7 +752,11 @@ async fn handle_batch_rank(
                         already_processed.insert(it.keyword.clone());
                     }
                     results = loaded;
-                    eprintln!("📋 Loaded {} existing results from '{}'.", results.len(), out_path);
+                    eprintln!(
+                        "📋 Loaded {} existing results from '{}'.",
+                        results.len(),
+                        out_path
+                    );
                 }
             }
         }
@@ -676,6 +795,13 @@ async fn handle_batch_rank(
             count, total, item.keyword, cat_label
         );
 
+        let match_mode = match args.r#match.as_str() {
+            "exact" => DomainMatchMode::Exact,
+            "wildcard" => DomainMatchMode::Wildcard,
+            "directory" => DomainMatchMode::Directory,
+            _ => DomainMatchMode::Subdomain,
+        };
+
         let req = RankRequest {
             target: args.target.clone(),
             q: item.keyword.clone(),
@@ -683,7 +809,7 @@ async fn handle_batch_rank(
             last_rank: 0,
             pagination_limit: args.limit,
             smart_full_fallback: false,
-            r#match: DomainMatchMode::Subdomain,
+            r#match: match_mode,
             device: DeviceType::Desktop,
             region: "US".to_string(),
             lang: "en".to_string(),
@@ -721,7 +847,13 @@ async fn handle_batch_rank(
                         String::new()
                     };
 
-                    eprintln!("{}{}({}ms)", rank_str, top_preview, elapsed.as_millis());
+                    let dir_preview = if resp.directory_count > 0 {
+                        format!(" [📁 Dirs: {} ({:.0}%)]", resp.directory_count, resp.directory_share_pct)
+                    } else {
+                        String::new()
+                    };
+
+                    eprintln!("{}{}{}({}ms)", rank_str, top_preview, dir_preview, elapsed.as_millis());
 
                     let audit_data = if args.audit {
                         eprint!(" [auditing top competitors...] ");
@@ -741,7 +873,10 @@ async fn handle_batch_rank(
                     };
 
                     let serp_slice = if args.top_results > 0 {
-                        resp.serp_results.into_iter().take(args.top_results).collect()
+                        resp.serp_results
+                            .into_iter()
+                            .take(args.top_results)
+                            .collect()
                     } else {
                         Vec::new()
                     };
@@ -760,6 +895,9 @@ async fn handle_batch_rank(
                         took_ms: elapsed.as_millis() as u64,
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         error: None,
+                        directory_count: resp.directory_count,
+                        directory_share_pct: resp.directory_share_pct,
+                        top_directories: resp.ranking_directories.clone(),
                         serp_results: serp_slice,
                         audit: audit_data,
                     });
@@ -794,6 +932,9 @@ async fn handle_batch_rank(
                             took_ms: elapsed.as_millis() as u64,
                             timestamp: chrono::Utc::now().to_rfc3339(),
                             error: Some(err_msg),
+                            directory_count: 0,
+                            directory_share_pct: 0.0,
+                            top_directories: Vec::new(),
                             serp_results: Vec::new(),
                             audit: None,
                         });
@@ -834,6 +975,42 @@ async fn handle_batch_rank(
         eprintln!("\n✅ Saved {} results to '{}'.", results.len(), out_path);
     }
 
+    // Aggregate Directory Intelligence Summary across the batch
+    let mut total_serp_positions = 0;
+    let mut total_directory_positions = 0;
+    let mut dir_domain_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for r in &results {
+        for s in &r.serp_results {
+            total_serp_positions += 1;
+            if s.is_directory {
+                total_directory_positions += 1;
+                let d = s.domain.clone().unwrap_or_else(|| "unknown".to_string());
+                *dir_domain_counts.entry(d).or_insert(0) += 1;
+            }
+        }
+    }
+
+    if total_directory_positions > 0 || args.directories {
+        let mut sorted_dirs: Vec<(String, usize)> = dir_domain_counts.into_iter().collect();
+        sorted_dirs.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let share_pct = if total_serp_positions > 0 {
+            (total_directory_positions as f64 / total_serp_positions as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        eprintln!("\n📁 Directory Intelligence & Market Share across {} keywords:", results.len());
+        eprintln!("  • Directory SERP Share: {}/{} total positions ({:.1}%)", total_directory_positions, total_serp_positions, share_pct);
+        if !sorted_dirs.is_empty() {
+            eprintln!("  • Top Dominating Directories:");
+            for (dir, cnt) in sorted_dirs.iter().take(8) {
+                let pct = (*cnt as f64 / total_directory_positions as f64) * 100.0;
+                eprintln!("    - {:<22} : {} positions ({:.1}%)", dir, cnt, pct);
+            }
+        }
+    }
+
     match args.format {
         CliFormat::Json => println!("{}", serde_json::to_string_pretty(&results)?),
         CliFormat::Csv => println!("{}", batch_results_to_csv(&results)),
@@ -846,11 +1023,23 @@ async fn handle_batch_rank(
 
 fn batch_results_to_csv(results: &[BatchRankResultItem]) -> String {
     let mut out = String::new();
-    out.push_str("keyword,category,priority,target_geo,target_url,ranked,rank,found_url,title,took_ms,top_competitor_1,top_competitor_2,top_competitor_3,key_recommendation\n");
+    out.push_str("keyword,category,priority,target_geo,target_url,ranked,rank,found_url,title,took_ms,directory_count,directory_share_pct,ranking_directories,top_competitor_1,top_competitor_2,top_competitor_3,key_recommendation\n");
     for item in results {
-        let comp1 = item.serp_results.first().map(|r| r.url.as_str()).unwrap_or("");
-        let comp2 = item.serp_results.get(1).map(|r| r.url.as_str()).unwrap_or("");
-        let comp3 = item.serp_results.get(2).map(|r| r.url.as_str()).unwrap_or("");
+        let comp1 = item
+            .serp_results
+            .first()
+            .map(|r| r.url.as_str())
+            .unwrap_or("");
+        let comp2 = item
+            .serp_results
+            .get(1)
+            .map(|r| r.url.as_str())
+            .unwrap_or("");
+        let comp3 = item
+            .serp_results
+            .get(2)
+            .map(|r| r.url.as_str())
+            .unwrap_or("");
         let rec = item
             .audit
             .as_ref()
@@ -858,7 +1047,7 @@ fn batch_results_to_csv(results: &[BatchRankResultItem]) -> String {
             .map(|i| format!("[{}] {}", i.category, i.actionable_recommendation))
             .unwrap_or_default();
         out.push_str(&format!(
-            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",{},\"{}\",\"{}\",\"{}\",{},\"{}\",\"{}\",\"{}\",\"{}\"\n",
+            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",{},\"{}\",\"{}\",\"{}\",{},{},{:.1},\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
             escape_csv_field(&item.keyword),
             escape_csv_field(item.category.as_deref().unwrap_or("")),
             escape_csv_field(item.priority.as_deref().unwrap_or("")),
@@ -869,6 +1058,9 @@ fn batch_results_to_csv(results: &[BatchRankResultItem]) -> String {
             escape_csv_field(item.serp_url.as_deref().unwrap_or("")),
             escape_csv_field(item.title.as_deref().unwrap_or("")),
             item.took_ms,
+            item.directory_count,
+            item.directory_share_pct,
+            escape_csv_field(&item.top_directories.join("; ")),
             escape_csv_field(comp1),
             escape_csv_field(comp2),
             escape_csv_field(comp3),
@@ -881,8 +1073,10 @@ fn batch_results_to_csv(results: &[BatchRankResultItem]) -> String {
 fn batch_results_to_markdown(results: &[BatchRankResultItem]) -> String {
     let mut out = String::new();
     out.push_str("# Batch Rank Tracking & Competitor Comparison Report\n\n");
-    out.push_str("| Keyword | Category | Rank | URL | Top Competitors | Primary Recommendation |\n");
-    out.push_str("| :--- | :--- | :---: | :--- | :--- | :--- |\n");
+    out.push_str(
+        "| Keyword | Category | Rank | URL | Directories in SERP | Top Competitors | Primary Recommendation |\n",
+    );
+    out.push_str("| :--- | :--- | :---: | :--- | :--- | :--- | :--- |\n");
     for item in results {
         let rank_badge = if item.ranked {
             format!("**#{}**", item.rank.unwrap_or(0))
@@ -896,6 +1090,11 @@ fn batch_results_to_markdown(results: &[BatchRankResultItem]) -> String {
             .filter_map(|r| r.domain.as_deref())
             .collect::<Vec<_>>()
             .join(", ");
+        let dir_str = if item.directory_count > 0 {
+            format!("{}/{} ({:.0}%)", item.directory_count, item.serp_results.len(), item.directory_share_pct)
+        } else {
+            "—".to_string()
+        };
         let rec = item
             .audit
             .as_ref()
@@ -903,12 +1102,17 @@ fn batch_results_to_markdown(results: &[BatchRankResultItem]) -> String {
             .map(|i| format!("**{}**: {}", i.category, i.actionable_recommendation))
             .unwrap_or_else(|| "—".to_string());
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {} | {} |\n",
+            "| `{}` | {} | {} | {} | {} | {} | {} |\n",
             item.keyword,
             item.category.as_deref().unwrap_or("—"),
             rank_badge,
             item.serp_url.as_deref().unwrap_or("—"),
-            if top_comp.is_empty() { "—" } else { &top_comp },
+            dir_str,
+            if top_comp.is_empty() {
+                "—"
+            } else {
+                &top_comp
+            },
             rec
         ));
     }
@@ -970,15 +1174,16 @@ async fn handle_flareprox(
     let client = frontlane_serp::flareprox::CloudflareClient::new(token, account, Some(prefix))?;
 
     match &args.action {
-        FlareproxAction::Create { count, name } => {
+        FlareproxAction::Create { count, name, region } => {
             let n = (*count).max(1);
-            println!("🔥 Deploying {} FlareProx worker proxy endpoint(s)...", n);
+            let region_label = region.as_deref().unwrap_or("default");
+            println!("🔥 Deploying {} FlareProx worker proxy endpoint(s) in region '{}'...", n, region_label);
 
             let mut deployed = Vec::new();
             for i in 0..n {
                 let worker_name = if n == 1 { name.as_deref() } else { None };
                 print!("  [{}/{}] Deploying worker... ", i + 1, n);
-                match client.create_worker(worker_name).await {
+                match client.create_worker(worker_name, region.as_deref()).await {
                     Ok(dep) => {
                         println!("✅ {}", dep.url);
                         deployed.push(dep);
@@ -996,10 +1201,7 @@ async fn handle_flareprox(
                     "  curl -H 'X-Target-URL: https://ifconfig.me/ip' {}",
                     deployed[0].url
                 );
-                println!(
-                    "  curl '{}/?url=https://ifconfig.me/ip'",
-                    deployed[0].url
-                );
+                println!("  curl '{}/?url=https://ifconfig.me/ip'", deployed[0].url);
                 println!("\nUse in Frontlane SERP queries:");
                 println!(
                     "  frontlane-serp search google \"query\" --proxy {}",
@@ -1052,11 +1254,7 @@ async fn handle_flareprox(
                 };
                 let lat_str = format!("{}ms", res.latency_ms);
                 let ip_str = res.egress_ip.as_deref().unwrap_or("-");
-                let result_str = if res.success {
-                    "✅ OK"
-                } else {
-                    "❌ FAILED"
-                };
+                let result_str = if res.success { "✅ OK" } else { "❌ FAILED" };
 
                 println!(
                     "  {:<35} {:<8} {:<10} {:<18} {:<10}",
@@ -1136,3 +1334,51 @@ async fn handle_flareprox(
 
     Ok(())
 }
+
+async fn handle_edge(
+    args: &frontlane_serp::cli::EdgeArgs,
+    config: &AppConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match &args.action {
+        frontlane_serp::cli::EdgeAction::Deploy {
+            name,
+            proxies,
+            region,
+            auto_recycle,
+        } => {
+            let opts = frontlane_serp::cli::edge::EdgeDeployOptions {
+                name: Some(name.clone()),
+                proxies: *proxies,
+                region: Some(region.clone()),
+                auto_recycle: *auto_recycle,
+            };
+            frontlane_serp::cli::edge::run_edge_deploy(
+                config,
+                args.token.clone(),
+                args.account.clone(),
+                opts,
+            )
+            .await?;
+        }
+        frontlane_serp::cli::EdgeAction::Status { name } => {
+            frontlane_serp::cli::edge::run_edge_status(
+                config,
+                args.token.clone(),
+                args.account.clone(),
+                Some(name.clone()),
+            )
+            .await?;
+        }
+        frontlane_serp::cli::EdgeAction::Destroy { name } => {
+            frontlane_serp::cli::edge::run_edge_destroy(
+                config,
+                args.token.clone(),
+                args.account.clone(),
+                Some(name.clone()),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+

@@ -45,8 +45,19 @@ md-5 = "0.11.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
 
+[features]
+default = []
+impersonate = ["dep:wreq", "dep:wreq-util"]
+
+# Browser TLS/JA3 fingerprint impersonation (see src/core/impersonate.rs) --
+# excluded on Windows. wreq vendors and compiles BoringSSL from source via
+# boring-sys/cmake. When the `impersonate` feature is not enabled, frontlane-serp
+# falls back to reqwest with standard TLS fingerprints.
+[target.'cfg(not(windows))'.dependencies]
+wreq = { version = "0.15.3", features = ["gzip", "brotli", "cookies", "socks", "json", "multipart"], optional = true }
+wreq-util = { version = "0.1.0", optional = true }
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.17"
 http-body-util = "0.1"
-

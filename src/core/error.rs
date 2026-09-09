@@ -71,6 +71,9 @@ pub enum SerpError {
     #[error("challenge solving failed: {0}")]
     ChallengeSolver(String),
 
+    #[error("impersonated request failed: {0}")]
+    Impersonate(String),
+
     #[error("other error: {0}")]
     Other(String),
 }

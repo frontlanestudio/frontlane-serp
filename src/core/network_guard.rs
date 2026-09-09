@@ -175,6 +175,79 @@ pub async fn validate_public_url(raw_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Validates that a proxy URL (http, https, socks5, socks5h) points to a public, safe host.
+pub async fn validate_public_proxy_url(raw_url: &str) -> Result<Url> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return Err(SerpError::InvalidParam(
+            "Proxy URL cannot be empty".to_string(),
+        ));
+    }
+
+    let parsed = Url::parse(trimmed)
+        .map_err(|e| SerpError::InvalidParam(format!("Invalid proxy URL format: {}", e)))?;
+
+    let scheme = parsed.scheme();
+    if !matches!(scheme, "http" | "https" | "socks5" | "socks5h") {
+        return Err(SerpError::InvalidParam(format!(
+            "Unsupported proxy scheme '{}': allowed schemes are http, https, socks5, socks5h",
+            scheme
+        )));
+    }
+
+    let host = match parsed.host_str() {
+        Some(h) if !h.is_empty() => h,
+        _ => {
+            return Err(SerpError::InvalidParam(
+                "Proxy URL host is required".to_string(),
+            ))
+        }
+    };
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !is_public_ip(ip) {
+            return Err(SerpError::Blocked(format!(
+                "Proxy host '{}' resolves to non-public IP: {}",
+                host, ip
+            )));
+        }
+        return Ok(parsed);
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let socket_addr_str = format!("{}:{}", host, port);
+
+    match tokio::net::lookup_host(&socket_addr_str).await {
+        Ok(addrs) => {
+            let mut resolved_any = false;
+            for addr in addrs {
+                resolved_any = true;
+                if !is_public_ip(addr.ip()) {
+                    return Err(SerpError::Blocked(format!(
+                        "Proxy host '{}' resolves to non-public IP: {}",
+                        host,
+                        addr.ip()
+                    )));
+                }
+            }
+            if !resolved_any {
+                return Err(SerpError::InvalidParam(format!(
+                    "Proxy host '{}' resolved to no IP addresses",
+                    host
+                )));
+            }
+        }
+        Err(e) => {
+            return Err(SerpError::InvalidParam(format!(
+                "Could not resolve proxy host '{}': {}",
+                host, e
+            )));
+        }
+    }
+
+    Ok(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

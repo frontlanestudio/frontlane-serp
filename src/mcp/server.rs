@@ -115,6 +115,20 @@ pub fn get_available_tools() -> Vec<McpTool> {
                 "required": ["url"]
             }),
         },
+        McpTool {
+            name: "serp_extract_contacts".to_string(),
+            description: "Extract all phone numbers, postal addresses, email addresses, and social profile links from a web page or entire site/domain."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Target web page URL or domain" },
+                    "crawl": { "type": "boolean", "description": "Whether to crawl internal contact/about/location pages across the domain", "default": false },
+                    "max_pages": { "type": "integer", "description": "Maximum pages to scan (1-50)", "default": 10 }
+                },
+                "required": ["url"]
+            }),
+        },
     ]
 }
 
@@ -463,6 +477,39 @@ pub async fn handle_tool_call(
                     content: vec![McpToolCallContent {
                         r#type: "text".to_string(),
                         text: format!("Crawl error: {}", e),
+                    }],
+                    is_error: true,
+                },
+            }
+        }
+        "serp_extract_contacts" => {
+            let target_url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let crawl = args.get("crawl").and_then(|v| v.as_bool()).unwrap_or(false);
+            let max_pages = args.get("max_pages").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+
+            match crate::extract::scan_contacts(
+                crawler.http_client(),
+                target_url,
+                crawl,
+                max_pages,
+                2,
+            )
+            .await
+            {
+                Ok(contacts) => {
+                    let json_out = serde_json::to_string_pretty(&contacts).unwrap_or_default();
+                    McpToolCallResult {
+                        content: vec![McpToolCallContent {
+                            r#type: "text".to_string(),
+                            text: json_out,
+                        }],
+                        is_error: false,
+                    }
+                }
+                Err(e) => McpToolCallResult {
+                    content: vec![McpToolCallContent {
+                        r#type: "text".to_string(),
+                        text: format!("Contacts extraction error: {}", e),
                     }],
                     is_error: true,
                 },

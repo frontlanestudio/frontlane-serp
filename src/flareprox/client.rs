@@ -86,6 +86,28 @@ struct AccountItem {
     name: String,
 }
 
+pub fn resolve_placement(region: &str) -> Option<String> {
+    let trimmed = region.trim().to_lowercase();
+    if trimmed.starts_with("aws:") || trimmed.starts_with("gcp:") || trimmed.starts_with("azure:") {
+        return Some(trimmed);
+    }
+    match trimmed.as_str() {
+        "de" | "germany" | "frankfurt" => Some("aws:eu-central-1".to_string()),
+        "gb" | "uk" | "london" => Some("aws:eu-west-2".to_string()),
+        "ie" | "ireland" | "dublin" => Some("aws:eu-west-1".to_string()),
+        "us" | "usa" | "us-east" | "virginia" => Some("aws:us-east-1".to_string()),
+        "us-west" | "oregon" | "california" => Some("aws:us-west-2".to_string()),
+        "jp" | "japan" | "tokyo" => Some("aws:ap-northeast-1".to_string()),
+        "sg" | "singapore" => Some("aws:ap-southeast-1".to_string()),
+        "au" | "australia" | "sydney" => Some("aws:ap-southeast-2".to_string()),
+        "fr" | "france" | "paris" => Some("aws:eu-west-3".to_string()),
+        "br" | "brazil" | "saopaulo" => Some("aws:sa-east-1".to_string()),
+        "in" | "india" | "mumbai" => Some("aws:ap-south-1".to_string()),
+        "ca" | "canada" | "central" => Some("aws:ca-central-1".to_string()),
+        _ => None,
+    }
+}
+
 impl CloudflareClient {
     pub async fn resolve_account_id(api_token: &str) -> Result<String, FlareProxError> {
         let client = Client::builder().timeout(Duration::from_secs(15)).build()?;
@@ -137,9 +159,7 @@ impl CloudflareClient {
             ));
         }
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
 
         let worker_prefix = worker_prefix
             .unwrap_or_else(|| DEFAULT_PREFIX.to_string())
@@ -159,7 +179,10 @@ impl CloudflareClient {
     }
 
     pub async fn get_subdomain(&self) -> Result<Option<String>, FlareProxError> {
-        let url = format!("{}/accounts/{}/workers/subdomain", CF_API_BASE, self.account_id);
+        let url = format!(
+            "{}/accounts/{}/workers/subdomain",
+            CF_API_BASE, self.account_id
+        );
         let resp = self
             .client
             .get(&url)
@@ -185,7 +208,10 @@ impl CloudflareClient {
     }
 
     pub async fn provision_subdomain(&self) -> Result<String, FlareProxError> {
-        let url = format!("{}/accounts/{}/workers/subdomain", CF_API_BASE, self.account_id);
+        let url = format!(
+            "{}/accounts/{}/workers/subdomain",
+            CF_API_BASE, self.account_id
+        );
         let prefix = &self.account_id[..std::cmp::min(10, self.account_id.len())].to_lowercase();
         let random_part: String = (0..4)
             .map(|_| {
@@ -232,7 +258,7 @@ impl CloudflareClient {
         self.provision_subdomain().await
     }
 
-    pub fn generate_worker_name(&self) -> String {
+    pub fn generate_worker_name(&self, region: Option<&str>) -> String {
         let now = chrono::Utc::now().timestamp();
         let random_suffix: String = (0..6)
             .map(|_| {
@@ -240,17 +266,23 @@ impl CloudflareClient {
                 (b'a' + idx) as char
             })
             .collect();
-        format!("{}-{}-{}", self.worker_prefix, now, random_suffix)
+        if let Some(r) = region {
+            let clean_r = r.trim().to_lowercase().replace(':', "-");
+            format!("{}-{}-{}-{}", self.worker_prefix, clean_r, now, random_suffix)
+        } else {
+            format!("{}-{}-{}", self.worker_prefix, now, random_suffix)
+        }
     }
 
     pub async fn create_worker(
         &self,
         name: Option<&str>,
+        region: Option<&str>,
     ) -> Result<FlareProxDeployment, FlareProxError> {
         let subdomain = self.ensure_subdomain().await?;
         let worker_name = match name {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
-            _ => self.generate_worker_name(),
+            _ => self.generate_worker_name(region),
         };
 
         let upload_url = format!(
@@ -258,10 +290,19 @@ impl CloudflareClient {
             CF_API_BASE, self.account_id, worker_name
         );
 
-        let metadata = serde_json::json!({
+        let mut metadata = serde_json::json!({
             "body_part": "script",
             "main_module": "worker.js"
         });
+
+        if let Some(r) = region {
+            if let Some(placement) = resolve_placement(r) {
+                metadata["placement"] = serde_json::json!({
+                    "mode": "smart",
+                    "region": placement
+                });
+            }
+        }
 
         let metadata_part = Part::text(metadata.to_string())
             .mime_str("application/json")
@@ -314,32 +355,142 @@ impl CloudflareClient {
                     break;
                 }
             }
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
         if !enabled {
             warn!(
-                "Warning: worker '{}' uploaded but subdomain enablement returned non-200. It may take a moment to propagate.",
+                "Worker uploaded but could not confirm subdomain enablement for {}",
                 worker_name
             );
         }
 
         let worker_url = format!("https://{}.{}.workers.dev", worker_name, subdomain);
-        let created_at = chrono::Utc::now().to_rfc3339();
-
-        info!("Deployed FlareProx worker: {}", worker_url);
-
         Ok(FlareProxDeployment {
             name: worker_name.clone(),
             url: worker_url,
-            created_at,
+            created_at: chrono::Utc::now().to_rfc3339(),
             id: worker_name,
+        })
+    }
+
+    pub async fn deploy_main_edge_worker(
+        &self,
+        worker_name: Option<&str>,
+        proxy_urls: &[String],
+        auto_recycle: bool,
+    ) -> Result<FlareProxDeployment, FlareProxError> {
+        let subdomain = self.ensure_subdomain().await?;
+        let name = worker_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "frontlane-serp-edge".to_string());
+
+        let upload_url = format!(
+            "{}/accounts/{}/workers/scripts/{}",
+            CF_API_BASE, self.account_id, name
+        );
+
+        let proxy_pool_str = proxy_urls.join(",");
+        let mut bindings = vec![
+            serde_json::json!({
+                "name": "PROXY_POOL",
+                "type": "plain_text",
+                "text": proxy_pool_str
+            }),
+            serde_json::json!({
+                "name": "AUTO_RECYCLE",
+                "type": "plain_text",
+                "text": if auto_recycle { "true" } else { "false" }
+            }),
+        ];
+
+        if auto_recycle {
+            bindings.push(serde_json::json!({
+                "name": "CF_API_TOKEN",
+                "type": "secret_text",
+                "text": self.api_token
+            }));
+            bindings.push(serde_json::json!({
+                "name": "CF_ACCOUNT_ID",
+                "type": "plain_text",
+                "text": self.account_id
+            }));
+        }
+
+        let metadata = serde_json::json!({
+            "body_part": "script",
+            "main_module": "worker.js",
+            "bindings": bindings
+        });
+
+        let metadata_part = Part::text(metadata.to_string())
+            .mime_str("application/json")
+            .map_err(|e| FlareProxError::Api(e.to_string()))?;
+
+        let script_part = Part::text(crate::flareprox::edge_worker_script::EDGE_WORKER_JS)
+            .file_name("worker.js")
+            .mime_str("application/javascript")
+            .map_err(|e| FlareProxError::Api(e.to_string()))?;
+
+        let form = Form::new()
+            .part("metadata", metadata_part)
+            .part("script", script_part);
+
+        let resp = self
+            .client
+            .put(&upload_url)
+            .bearer_auth(&self.api_token)
+            .multipart(form)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(FlareProxError::Api(format!(
+                "Failed to upload main edge worker script: {}",
+                err_text
+            )));
+        }
+
+        // Enable on subdomain
+        let subdomain_url = format!(
+            "{}/accounts/{}/workers/scripts/{}/subdomain",
+            CF_API_BASE, self.account_id, name
+        );
+
+        for _ in 0..3 {
+            let sub_resp = self
+                .client
+                .post(&subdomain_url)
+                .bearer_auth(&self.api_token)
+                .json(&serde_json::json!({ "enabled": true }))
+                .send()
+                .await;
+
+            if let Ok(res) = sub_resp {
+                if res.status().is_success() {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        let worker_url = format!("https://{}.{}.workers.dev", name, subdomain);
+        Ok(FlareProxDeployment {
+            name: name.clone(),
+            url: worker_url,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            id: name,
         })
     }
 
     pub async fn list_workers(&self) -> Result<Vec<FlareProxDeployment>, FlareProxError> {
         let subdomain = self.get_subdomain().await?.unwrap_or_default();
-        let url = format!("{}/accounts/{}/workers/scripts", CF_API_BASE, self.account_id);
+        let url = format!(
+            "{}/accounts/{}/workers/scripts",
+            CF_API_BASE, self.account_id
+        );
 
         let resp = self
             .client
@@ -448,14 +599,10 @@ impl CloudflareClient {
                 let body = resp.text().await.unwrap_or_default();
                 let clean_body = body.trim().to_string();
 
-                let is_ip_like = clean_body.len() < 50
-                    && (clean_body.contains('.') || clean_body.contains(':'));
+                let is_ip_like =
+                    clean_body.len() < 50 && (clean_body.contains('.') || clean_body.contains(':'));
 
-                let egress_ip = if is_ip_like {
-                    Some(clean_body)
-                } else {
-                    None
-                };
+                let egress_ip = if is_ip_like { Some(clean_body) } else { None };
 
                 let success = (200..400).contains(&status);
 
@@ -496,5 +643,7 @@ fn rand_u32() -> u32 {
         .map(|d| d.subsec_nanos())
         .unwrap_or(42);
     let ptr = &seed as *const _ as usize as u32;
-    seed.wrapping_mul(1664525).wrapping_add(ptr).wrapping_add(1013904223)
+    seed.wrapping_mul(1664525)
+        .wrapping_add(ptr)
+        .wrapping_add(1013904223)
 }

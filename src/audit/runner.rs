@@ -65,7 +65,9 @@ pub async fn run_audit_for_rank_response(
     let competitors_to_audit: Vec<(usize, String)> = rank_resp
         .serp_results
         .iter()
-        .filter(|r| !r.is_target && !matches_target(&r.url, target_domain, DomainMatchMode::Subdomain))
+        .filter(|r| {
+            !r.is_target && !matches_target(&r.url, target_domain, DomainMatchMode::Subdomain)
+        })
         .take(competitor_limit)
         .map(|r| (r.rank, r.url.clone()))
         .collect();
@@ -108,8 +110,17 @@ pub async fn run_audit_for_rank_response(
 
     competitor_audits.sort_by_key(|c| c.rank_num.unwrap_or(999));
 
-    let has_local_pack = rank_resp.serp_features.iter().any(|f| matches!(f.feature_type, crate::core::types::ResultType::Local));
-    let has_paa = rank_resp.serp_features.iter().any(|f| matches!(f.feature_type, crate::core::types::ResultType::PeopleAlsoAsk | crate::core::types::ResultType::RelatedQuestions));
+    let has_local_pack = rank_resp
+        .serp_features
+        .iter()
+        .any(|f| matches!(f.feature_type, crate::core::types::ResultType::Local));
+    let has_paa = rank_resp.serp_features.iter().any(|f| {
+        matches!(
+            f.feature_type,
+            crate::core::types::ResultType::PeopleAlsoAsk
+                | crate::core::types::ResultType::RelatedQuestions
+        )
+    });
 
     let gap_out = analyze_gaps(
         keyword,
@@ -160,7 +171,10 @@ async fn audit_single_url(
         Err(e) => {
             let domain = url::Url::parse(url)
                 .ok()
-                .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+                .and_then(|u| {
+                    u.host_str()
+                        .map(|h| h.trim_start_matches("www.").to_string())
+                })
                 .unwrap_or_default();
             PageAuditResult {
                 rank_label,

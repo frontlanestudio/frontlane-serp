@@ -5,7 +5,7 @@ use serde_json::json;
 #[test]
 fn test_mcp_tools_list() {
     let tools = get_available_tools();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 7);
 
     let names: Vec<String> = tools.into_iter().map(|t| t.name).collect();
     assert!(names.contains(&"serp_search".to_string()));
@@ -14,6 +14,7 @@ fn test_mcp_tools_list() {
     assert!(names.contains(&"extract_content".to_string()));
     assert!(names.contains(&"mega_search".to_string()));
     assert!(names.contains(&"crawl_site".to_string()));
+    assert!(names.contains(&"serp_extract_contacts".to_string()));
 }
 
 #[test]
