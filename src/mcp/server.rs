@@ -293,7 +293,11 @@ pub async fn handle_tool_call(
             let region = args.get("region").and_then(|v| v.as_str()).unwrap_or("us");
             let lang = args.get("lang").and_then(|v| v.as_str()).unwrap_or("en");
 
-            match ctx.suggest.suggest(engine_name, query_text, lang, region).await {
+            match ctx
+                .suggest
+                .suggest(engine_name, query_text, lang, region)
+                .await
+            {
                 Ok(resp) => McpToolCallResult::success_json(&resp),
                 Err(e) => McpToolCallResult::error(format!("Suggest error: {}", e)),
             }

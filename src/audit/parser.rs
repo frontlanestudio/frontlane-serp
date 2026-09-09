@@ -275,17 +275,7 @@ fn extract_schema_types(val: &serde_json::Value, out: &mut Vec<String>) {
     match val {
         serde_json::Value::Object(map) => {
             if let Some(t) = map.get("@type") {
-                match t {
-                    serde_json::Value::String(s) => out.push(s.clone()),
-                    serde_json::Value::Array(arr) => {
-                        for item in arr {
-                            if let serde_json::Value::String(s) = item {
-                                out.push(s.clone());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                push_type_strings(t, out);
             }
             if let Some(graph) = map.get("@graph") {
                 extract_schema_types(graph, out);
@@ -305,6 +295,30 @@ fn extract_schema_types(val: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
+fn push_type_strings(val: &serde_json::Value, out: &mut Vec<String>) {
+    match val {
+        serde_json::Value::String(s) => out.push(s.clone()),
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                if let serde_json::Value::String(s) = item {
+                    out.push(s.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_numeric_f64(v: &serde_json::Value) -> Option<f64> {
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+fn parse_numeric_u64(v: &serde_json::Value) -> Option<u64> {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
 fn extract_ratings_and_reviews(
     val: &serde_json::Value,
     rating: &mut Option<f64>,
@@ -314,26 +328,13 @@ fn extract_ratings_and_reviews(
         serde_json::Value::Object(map) => {
             if let Some(serde_json::Value::Object(ar)) = map.get("aggregateRating") {
                 if rating.is_none() {
-                    if let Some(r) = ar.get("ratingValue") {
-                        if let Some(num) = r.as_f64() {
-                            *rating = Some(num);
-                        } else if let Some(s) = r.as_str() {
-                            if let Ok(num) = s.parse::<f64>() {
-                                *rating = Some(num);
-                            }
-                        }
-                    }
+                    *rating = ar.get("ratingValue").and_then(parse_numeric_f64);
                 }
                 if reviews.is_none() {
-                    if let Some(c) = ar.get("reviewCount").or_else(|| ar.get("ratingCount")) {
-                        if let Some(num) = c.as_u64() {
-                            *reviews = Some(num);
-                        } else if let Some(s) = c.as_str() {
-                            if let Ok(num) = s.parse::<u64>() {
-                                *reviews = Some(num);
-                            }
-                        }
-                    }
+                    *reviews = ar
+                        .get("reviewCount")
+                        .or_else(|| ar.get("ratingCount"))
+                        .and_then(parse_numeric_u64);
                 }
             }
 

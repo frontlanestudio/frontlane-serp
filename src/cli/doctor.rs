@@ -159,17 +159,7 @@ pub async fn run_doctor(
                     }
                     Err(e) => {
                         all_ok = false;
-                        let err_str = e.to_string();
-                        if err_str.to_lowercase().contains("captcha") {
-                            println!(
-                                "    • {:<14} : ⚠ CAPTCHA / Bot Gate detected",
-                                engine.name()
-                            );
-                        } else if err_str.to_lowercase().contains("rate") {
-                            println!("    • {:<14} : ⚠ Rate limited", engine.name());
-                        } else {
-                            println!("    • {:<14} : ❌ Error: {}", engine.name(), err_str);
-                        }
+                        print_engine_probe_error(engine.name(), &e.to_string());
                     }
                 }
             } else {
@@ -223,4 +213,15 @@ pub async fn run_doctor(
     println!("  Quick Search:  frontlane-serp search duckduckgo \"rust async\"\n");
 
     Ok(())
+}
+
+fn print_engine_probe_error(engine_name: &str, err_str: &str) {
+    let lower = err_str.to_lowercase();
+    if lower.contains("captcha") {
+        println!("    • {:<14} : ⚠ CAPTCHA / Bot Gate detected", engine_name);
+    } else if lower.contains("rate") {
+        println!("    • {:<14} : ⚠ Rate limited", engine_name);
+    } else {
+        println!("    • {:<14} : ❌ Error: {}", engine_name, err_str);
+    }
 }

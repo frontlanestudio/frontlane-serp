@@ -650,6 +650,140 @@ struct BatchRankResultItem {
     audit: Option<frontlane_serp::audit::KeywordAuditReport>,
 }
 
+fn format_rank_progress(resp: &frontlane_serp::rank::RankResponse, elapsed_ms: u128) -> String {
+    let rank_str = if resp.ranked {
+        format!("🎯 Rank #{}", resp.rank.unwrap_or(0))
+    } else {
+        "❌ Unranked".to_string()
+    };
+
+    let top_preview = if !resp.serp_results.is_empty() {
+        let top_domains: Vec<&str> = resp
+            .serp_results
+            .iter()
+            .take(3)
+            .filter_map(|r| r.domain.as_deref())
+            .collect();
+        if !top_domains.is_empty() {
+            format!(" [Top: {}]", top_domains.join(", "))
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let dir_preview = if resp.directory_count > 0 {
+        format!(
+            " [📁 Dirs: {} ({:.0}%)]",
+            resp.directory_count, resp.directory_share_pct
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        "{}{}{}({}ms)",
+        rank_str, top_preview, dir_preview, elapsed_ms
+    )
+}
+
+fn parse_csv_keyword_items(content: &str) -> Vec<BatchKeywordItem> {
+    let mut items = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return items;
+    }
+    let header: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
+    let kw_idx = header
+        .iter()
+        .position(|&h| h.eq_ignore_ascii_case("keyword"))
+        .unwrap_or(0);
+    let url_idx = header
+        .iter()
+        .position(|&h| h.eq_ignore_ascii_case("target_url"));
+    let cat_idx = header
+        .iter()
+        .position(|&h| h.eq_ignore_ascii_case("category"));
+    let prio_idx = header
+        .iter()
+        .position(|&h| h.eq_ignore_ascii_case("priority"));
+    let geo_idx = header
+        .iter()
+        .position(|&h| h.eq_ignore_ascii_case("target_geo"));
+
+    for line in &lines[1..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = trimmed
+            .split(',')
+            .map(|c| c.trim().trim_matches('"'))
+            .collect();
+        if cols.len() > kw_idx && !cols[kw_idx].is_empty() {
+            items.push(BatchKeywordItem {
+                keyword: cols[kw_idx].to_string(),
+                target_url: url_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                category: cat_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                priority: prio_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+                target_geo: geo_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
+            });
+        }
+    }
+    items
+}
+
+async fn load_batch_keyword_items(file_path: &str) -> Result<Vec<BatchKeywordItem>, String> {
+    let content = tokio::fs::read_to_string(file_path)
+        .await
+        .map_err(|e| format!("Failed to read keywords file '{}': {}", file_path, e))?;
+
+    if file_path.ends_with(".csv") {
+        Ok(parse_csv_keyword_items(&content))
+    } else if file_path.ends_with(".json") {
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse JSON keyword list: {}", e))
+    } else {
+        let items = content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| BatchKeywordItem {
+                keyword: line.to_string(),
+                target_url: None,
+                category: None,
+                priority: None,
+                target_geo: None,
+            })
+            .collect();
+        Ok(items)
+    }
+}
+
+async fn load_existing_batch_results(
+    out_path: &str,
+) -> (Vec<BatchRankResultItem>, std::collections::HashSet<String>) {
+    let mut results = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    if let Ok(content) = tokio::fs::read_to_string(out_path).await {
+        if let Ok(loaded) = serde_json::from_str::<Vec<BatchRankResultItem>>(&content) {
+            for it in &loaded {
+                seen.insert(it.keyword.clone());
+            }
+            results = loaded;
+            eprintln!(
+                "📋 Loaded {} existing results from '{}'.",
+                results.len(),
+                out_path
+            );
+        }
+    }
+
+    (results, seen)
+}
+
 async fn handle_batch_rank(
     args: &BatchRankArgs,
     engines: &[Arc<dyn SearchEngine>],
@@ -666,90 +800,15 @@ async fn handle_batch_rank(
         .ok_or_else(|| format!("Unknown engine: {}", args.engine))?
         .clone();
 
-    let file_content = tokio::fs::read_to_string(&args.file)
-        .await
-        .map_err(|e| format!("Failed to read keywords file '{}': {}", args.file, e))?;
-
-    let mut items: Vec<BatchKeywordItem> = Vec::new();
-
-    if args.file.ends_with(".csv") {
-        let lines: Vec<&str> = file_content.lines().collect();
-        if !lines.is_empty() {
-            let header: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
-            let kw_idx = header
-                .iter()
-                .position(|&h| h.eq_ignore_ascii_case("keyword"))
-                .unwrap_or(0);
-            let url_idx = header
-                .iter()
-                .position(|&h| h.eq_ignore_ascii_case("target_url"));
-            let cat_idx = header
-                .iter()
-                .position(|&h| h.eq_ignore_ascii_case("category"));
-            let prio_idx = header
-                .iter()
-                .position(|&h| h.eq_ignore_ascii_case("priority"));
-            let geo_idx = header
-                .iter()
-                .position(|&h| h.eq_ignore_ascii_case("target_geo"));
-
-            for line in &lines[1..] {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let cols: Vec<&str> = trimmed
-                    .split(',')
-                    .map(|c| c.trim().trim_matches('"'))
-                    .collect();
-                if cols.len() > kw_idx && !cols[kw_idx].is_empty() {
-                    items.push(BatchKeywordItem {
-                        keyword: cols[kw_idx].to_string(),
-                        target_url: url_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
-                        category: cat_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
-                        priority: prio_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
-                        target_geo: geo_idx.and_then(|i| cols.get(i).map(|s| s.to_string())),
-                    });
-                }
-            }
-        }
-    } else if args.file.ends_with(".json") {
-        items = serde_json::from_str(&file_content)
-            .map_err(|e| format!("Failed to parse JSON keyword list: {}", e))?;
-    } else {
-        // Plain text line-separated
-        for line in file_content.lines() {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                items.push(BatchKeywordItem {
-                    keyword: trimmed.to_string(),
-                    target_url: None,
-                    category: None,
-                    priority: None,
-                    target_geo: None,
-                });
-            }
-        }
-    }
-
+    let mut items = load_batch_keyword_items(&args.file).await?;
     let mut results: Vec<BatchRankResultItem> = Vec::new();
     let mut already_processed: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     if let Some(ref out_path) = args.output {
         if (args.resume || args.offset > 0) && tokio::fs::metadata(out_path).await.is_ok() {
-            if let Ok(content) = tokio::fs::read_to_string(out_path).await {
-                if let Ok(loaded) = serde_json::from_str::<Vec<BatchRankResultItem>>(&content) {
-                    for it in &loaded {
-                        already_processed.insert(it.keyword.clone());
-                    }
-                    results = loaded;
-                    eprintln!(
-                        "📋 Loaded {} existing results from '{}'.",
-                        results.len(),
-                        out_path
-                    );
-                }
-            }
+            let (loaded_results, seen) = load_existing_batch_results(out_path).await;
+            results = loaded_results;
+            already_processed = seen;
         }
     }
 
@@ -816,44 +875,8 @@ async fn handle_batch_rank(
 
             match rank_res {
                 Ok(resp) => {
-                    let rank_str = if resp.ranked {
-                        format!("🎯 Rank #{}", resp.rank.unwrap_or(0))
-                    } else {
-                        "❌ Unranked".to_string()
-                    };
-
-                    let top_preview = if !resp.serp_results.is_empty() {
-                        let top_domains: Vec<&str> = resp
-                            .serp_results
-                            .iter()
-                            .take(3)
-                            .filter_map(|r| r.domain.as_deref())
-                            .collect();
-                        if !top_domains.is_empty() {
-                            format!(" [Top: {}]", top_domains.join(", "))
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        String::new()
-                    };
-
-                    let dir_preview = if resp.directory_count > 0 {
-                        format!(
-                            " [📁 Dirs: {} ({:.0}%)]",
-                            resp.directory_count, resp.directory_share_pct
-                        )
-                    } else {
-                        String::new()
-                    };
-
-                    eprintln!(
-                        "{}{}{}({}ms)",
-                        rank_str,
-                        top_preview,
-                        dir_preview,
-                        elapsed.as_millis()
-                    );
+                    let progress = format_rank_progress(&resp, elapsed.as_millis());
+                    eprintln!("{}", progress);
 
                     let audit_data = if args.audit {
                         eprint!(" [auditing top competitors...] ");

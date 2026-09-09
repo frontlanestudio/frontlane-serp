@@ -30,48 +30,12 @@ pub fn extract_serp_features_by_selectors(
                 break;
             }
 
-            if let Ok(container_sel) = Selector::parse(container_sel_str) {
-                for container in doc.select(&container_sel) {
-                    let title = if !spec.title.is_empty() {
-                        Some(spec.title.to_string())
-                    } else {
-                        first_selected_text(&container, spec.title_selector)
-                    };
+            let Ok(container_sel) = Selector::parse(container_sel_str) else {
+                continue;
+            };
 
-                    let text = first_selected_text(&container, spec.text_selector);
-                    let items = selected_feature_items(&container, spec.item_selector);
-                    let links = selected_feature_links(&container, spec.link_selector);
-
-                    if text.is_none() && items.is_empty() && links.is_empty() {
-                        continue;
-                    }
-
-                    let position = if spec.position > 0 {
-                        Some(Position {
-                            absolute: spec.position,
-                        })
-                    } else {
-                        None
-                    };
-
-                    let feature = SerpFeature {
-                        id: String::new(),
-                        engine: String::new(),
-                        feature_type: spec.feature_type,
-                        title,
-                        text,
-                        items,
-                        links,
-                        source_result_ids: Vec::new(),
-                        position,
-                        confidence: if spec.confidence > 0.0 {
-                            Some(spec.confidence)
-                        } else {
-                            None
-                        },
-                        extracted_at: String::new(),
-                    };
-
+            for container in doc.select(&container_sel) {
+                if let Some(feature) = build_feature_from_container(&container, spec) {
                     features.push(feature);
                     matched = true;
                     if spec.single_match {
@@ -83,6 +47,53 @@ pub fn extract_serp_features_by_selectors(
     }
 
     deduplicate_serp_features(features)
+}
+
+fn build_feature_from_container(
+    container: &ElementRef,
+    spec: &SerpFeatureSelector,
+) -> Option<SerpFeature> {
+    let title = if !spec.title.is_empty() {
+        Some(spec.title.to_string())
+    } else {
+        first_selected_text(container, spec.title_selector)
+    };
+
+    let text = first_selected_text(container, spec.text_selector);
+    let items = selected_feature_items(container, spec.item_selector);
+    let links = selected_feature_links(container, spec.link_selector);
+
+    if text.is_none() && items.is_empty() && links.is_empty() {
+        return None;
+    }
+
+    let position = if spec.position > 0 {
+        Some(Position {
+            absolute: spec.position,
+        })
+    } else {
+        None
+    };
+
+    let confidence = if spec.confidence > 0.0 {
+        Some(spec.confidence)
+    } else {
+        None
+    };
+
+    Some(SerpFeature {
+        id: String::new(),
+        engine: String::new(),
+        feature_type: spec.feature_type,
+        title,
+        text,
+        items,
+        links,
+        source_result_ids: Vec::new(),
+        position,
+        confidence,
+        extracted_at: String::new(),
+    })
 }
 
 pub fn deduplicate_serp_features(features: Vec<SerpFeature>) -> Vec<SerpFeature> {

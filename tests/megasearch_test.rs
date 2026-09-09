@@ -25,65 +25,56 @@ impl SearchEngine for MockEngine {
     }
 }
 
+fn mock_result(rank: i32, url: &str, title: &str, desc: &str) -> SearchResult {
+    SearchResult {
+        rank,
+        absolute_rank: rank,
+        result_type: ResultType::Organic,
+        url: url.to_string(),
+        title: title.to_string(),
+        description: desc.to_string(),
+        ad: false,
+        features: vec![],
+        image_data: None,
+        image_source: None,
+    }
+}
+
 #[tokio::test]
 async fn test_megasearch_dedup_and_clusters() {
     let engine_a = Arc::new(MockEngine {
         name: "mock_a",
         results: vec![
-            SearchResult {
-                rank: 1,
-                absolute_rank: 1,
-                result_type: ResultType::Organic,
-                url: "https://example.com/rust".to_string(),
-                title: "Rust Lang".to_string(),
-                description: "Rust programming language".to_string(),
-                ad: false,
-                features: vec![],
-                image_data: None,
-                image_source: None,
-            },
-            SearchResult {
-                rank: 2,
-                absolute_rank: 2,
-                result_type: ResultType::Organic,
-                url: "https://example.com/go".to_string(),
-                title: "Go Lang".to_string(),
-                description: "Go programming language".to_string(),
-                ad: false,
-                features: vec![],
-                image_data: None,
-                image_source: None,
-            },
+            mock_result(
+                1,
+                "https://example.com/rust",
+                "Rust Lang",
+                "Rust programming language",
+            ),
+            mock_result(
+                2,
+                "https://example.com/go",
+                "Go Lang",
+                "Go programming language",
+            ),
         ],
     });
 
     let engine_b = Arc::new(MockEngine {
         name: "mock_b",
         results: vec![
-            SearchResult {
-                rank: 1,
-                absolute_rank: 1,
-                result_type: ResultType::Organic,
-                url: "https://example.com/rust?utm_source=test".to_string(),
-                title: "Rust Lang Home".to_string(),
-                description: "Fast, reliable language".to_string(),
-                ad: false,
-                features: vec![],
-                image_data: None,
-                image_source: None,
-            },
-            SearchResult {
-                rank: 2,
-                absolute_rank: 2,
-                result_type: ResultType::Organic,
-                url: "https://example.com/python".to_string(),
-                title: "Python Lang".to_string(),
-                description: "Python language".to_string(),
-                ad: false,
-                features: vec![],
-                image_data: None,
-                image_source: None,
-            },
+            mock_result(
+                1,
+                "https://example.com/rust?utm_source=test",
+                "Rust Lang Home",
+                "Fast, reliable language",
+            ),
+            mock_result(
+                2,
+                "https://example.com/python",
+                "Python Lang",
+                "Python language",
+            ),
         ],
     });
 

@@ -100,6 +100,19 @@ impl ProxyManager {
         }
     }
 
+    fn select_best_proxy<'a>(
+        candidates: impl IntoIterator<Item = &'a ProxyEntry>,
+    ) -> Option<String> {
+        let list: Vec<&'a ProxyEntry> = candidates.into_iter().collect();
+        if list.is_empty() {
+            None
+        } else if let Some(unchallenged) = list.iter().find(|e| !e.is_challenged()) {
+            Some(unchallenged.url.clone())
+        } else {
+            Some(list[0].url.clone())
+        }
+    }
+
     pub async fn resolve_proxy(
         &self,
         engine_tag: Option<&str>,
@@ -132,41 +145,28 @@ impl ProxyManager {
             }
         }
 
-        // 3. Geo-targeted country matching (if X-Proxy-Country or country is requested)
+        // 3. Geo-targeted country matching
         if let Some(c) = country {
             let clean_c = c.trim();
             if !clean_c.is_empty() {
-                // Filter entries matching country
-                let candidates: Vec<&ProxyEntry> = state
+                let country_candidates = state
                     .entries
                     .iter()
-                    .filter(|e| e.healthy && e.matches_country(clean_c))
-                    .collect();
-
-                if !candidates.is_empty() {
-                    // Prefer non-challenged entries
-                    if let Some(unchallenged) = candidates.iter().find(|e| !e.is_challenged()) {
-                        return Some(unchallenged.url.clone());
-                    }
-                    // Fall back to first country candidate even if on cooldown
-                    return Some(candidates[0].url.clone());
+                    .filter(|e| e.healthy && e.matches_country(clean_c));
+                if let Some(selected) = Self::select_best_proxy(country_candidates) {
+                    return Some(selected);
                 }
             }
         }
 
         // 4. Engine-specific tag matching
         if let Some(tag) = engine_tag {
-            let candidates: Vec<&ProxyEntry> = state
+            let tag_candidates = state
                 .entries
                 .iter()
-                .filter(|e| e.healthy && e.matches_tag(tag))
-                .collect();
-
-            if !candidates.is_empty() {
-                if let Some(unchallenged) = candidates.iter().find(|e| !e.is_challenged()) {
-                    return Some(unchallenged.url.clone());
-                }
-                return Some(candidates[0].url.clone());
+                .filter(|e| e.healthy && e.matches_tag(tag));
+            if let Some(selected) = Self::select_best_proxy(tag_candidates) {
+                return Some(selected);
             }
         }
 
@@ -178,17 +178,8 @@ impl ProxyManager {
         }
 
         // 6. Any healthy proxy (preferring non-challenged)
-        let healthy_candidates: Vec<&ProxyEntry> =
-            state.entries.iter().filter(|e| e.healthy).collect();
-
-        if !healthy_candidates.is_empty() {
-            if let Some(unchallenged) = healthy_candidates.iter().find(|e| !e.is_challenged()) {
-                return Some(unchallenged.url.clone());
-            }
-            return Some(healthy_candidates[0].url.clone());
-        }
-
-        None
+        let healthy_candidates = state.entries.iter().filter(|e| e.healthy);
+        Self::select_best_proxy(healthy_candidates)
     }
 
     pub async fn report_result(&self, proxy_url: &str, success: bool) {

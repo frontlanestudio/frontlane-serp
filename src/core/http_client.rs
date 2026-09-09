@@ -415,19 +415,15 @@ impl HttpClient {
                 let gateway = crate::flareprox::normalize_flareprox_url(clean);
                 let mut req = self.client.get(&gateway).header("X-Target-URL", url);
 
-                if let Some(ua) = custom_ua {
-                    if !ua.trim().is_empty() {
-                        if let Ok(val) = HeaderValue::from_str(ua) {
-                            req = req.header(USER_AGENT, val);
-                        }
+                if let Some(ua) = custom_ua.map(str::trim).filter(|s| !s.is_empty()) {
+                    if let Ok(val) = HeaderValue::from_str(ua) {
+                        req = req.header(USER_AGENT, val);
                     }
                 }
 
-                if let Some(cookie_str) = cookies {
-                    if !cookie_str.trim().is_empty() {
-                        if let Ok(val) = HeaderValue::from_str(cookie_str) {
-                            req = req.header(COOKIE, val);
-                        }
+                if let Some(cookie_str) = cookies.map(str::trim).filter(|s| !s.is_empty()) {
+                    if let Ok(val) = HeaderValue::from_str(cookie_str) {
+                        req = req.header(COOKIE, val);
                     }
                 }
 

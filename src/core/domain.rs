@@ -139,36 +139,31 @@ pub fn split_domain(domain: &str) -> (Option<String>, Option<String>) {
 
 fn domain_category(domain: &str, tld: Option<&str>, cfg: &EnrichmentConfig) -> String {
     let tld_str = tld.unwrap_or("");
-    if tld_str == "gov" || tld_str.ends_with(".gov") || domain.ends_with(".gov") {
-        return "gov".to_string();
-    }
-    if tld_str == "edu"
+    let cat = if tld_str == "gov" || tld_str.ends_with(".gov") || domain.ends_with(".gov") {
+        "gov"
+    } else if tld_str == "edu"
         || tld_str.ends_with(".edu")
         || tld_str == "ac.uk"
         || domain.ends_with(".edu")
         || domain.ends_with(".ac.uk")
     {
-        return "edu".to_string();
-    }
-    if tld_str == "mil" {
-        return "mil".to_string();
-    }
-    if cfg.news_domains.contains(domain) {
-        return "news".to_string();
-    }
-    if cfg.forum_domains.contains(domain) {
-        return "forum".to_string();
-    }
-    if cfg.marketplace_domains.contains(domain) {
-        return "marketplace".to_string();
-    }
-    if cfg.social_domains.contains(domain) {
-        return "social".to_string();
-    }
-    if cfg.directory_domains.contains(domain) || is_directory_domain(domain) {
-        return "directory".to_string();
-    }
-    String::new()
+        "edu"
+    } else if tld_str == "mil" {
+        "mil"
+    } else if cfg.news_domains.contains(domain) {
+        "news"
+    } else if cfg.forum_domains.contains(domain) {
+        "forum"
+    } else if cfg.marketplace_domains.contains(domain) {
+        "marketplace"
+    } else if cfg.social_domains.contains(domain) {
+        "social"
+    } else if cfg.directory_domains.contains(domain) || is_directory_domain(domain) {
+        "directory"
+    } else {
+        ""
+    };
+    cat.to_string()
 }
 
 pub fn enrich_domain_info(domain: &str) -> Option<DomainInfo> {

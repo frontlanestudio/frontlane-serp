@@ -71,6 +71,47 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
     true
 }
 
+async fn validate_host_publicity(host: &str, port: u16, entity_type: &str) -> Result<()> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !is_public_ip(ip) {
+            return Err(SerpError::Blocked(format!(
+                "{} host '{}' resolves to non-public IP: {}",
+                entity_type, host, ip
+            )));
+        }
+        return Ok(());
+    }
+
+    let addrs = tokio::net::lookup_host((host, port)).await.map_err(|e| {
+        SerpError::InvalidParam(format!(
+            "Could not resolve {} host '{}': {}",
+            entity_type.to_lowercase(),
+            host,
+            e
+        ))
+    })?;
+
+    let mut resolved_any = false;
+    for addr in addrs {
+        resolved_any = true;
+        if !is_public_ip(addr.ip()) {
+            return Err(SerpError::Blocked(format!(
+                "{} host '{}' resolves to non-public IP: {}",
+                entity_type,
+                host,
+                addr.ip()
+            )));
+        }
+    }
+    if !resolved_any {
+        return Err(SerpError::InvalidParam(format!(
+            "{} host '{}' resolved to no IP addresses",
+            entity_type, host
+        )));
+    }
+    Ok(())
+}
+
 /// Validates that an HTTP(S) URL points to a public, safe endpoint (SSRF protection).
 /// Verifies the scheme is http/https, host is non-empty, and all resolved IP addresses
 /// are public.
@@ -95,48 +136,8 @@ pub async fn validate_public_url(raw_url: &str) -> Result<Url> {
         _ => return Err(SerpError::InvalidParam("URL host is required".to_string())),
     };
 
-    // If host is a literal IP address
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if !is_public_ip(ip) {
-            return Err(SerpError::Blocked(format!(
-                "Target host '{}' resolves to non-public IP: {}",
-                host, ip
-            )));
-        }
-        return Ok(parsed);
-    }
-
-    // Resolve domain host
     let port = parsed.port_or_known_default().unwrap_or(80);
-    let socket_addr_str = format!("{}:{}", host, port);
-
-    match tokio::net::lookup_host(&socket_addr_str).await {
-        Ok(addrs) => {
-            let mut resolved_any = false;
-            for addr in addrs {
-                resolved_any = true;
-                if !is_public_ip(addr.ip()) {
-                    return Err(SerpError::Blocked(format!(
-                        "Target host '{}' resolves to non-public IP: {}",
-                        host,
-                        addr.ip()
-                    )));
-                }
-            }
-            if !resolved_any {
-                return Err(SerpError::InvalidParam(format!(
-                    "Target host '{}' resolved to no IP addresses",
-                    host
-                )));
-            }
-        }
-        Err(e) => {
-            return Err(SerpError::InvalidParam(format!(
-                "Could not resolve host '{}': {}",
-                host, e
-            )));
-        }
-    }
+    validate_host_publicity(host, port, "Target").await?;
 
     Ok(parsed)
 }
@@ -170,46 +171,8 @@ pub async fn validate_public_proxy_url(raw_url: &str) -> Result<Url> {
         }
     };
 
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if !is_public_ip(ip) {
-            return Err(SerpError::Blocked(format!(
-                "Proxy host '{}' resolves to non-public IP: {}",
-                host, ip
-            )));
-        }
-        return Ok(parsed);
-    }
-
     let port = parsed.port_or_known_default().unwrap_or(80);
-    let socket_addr_str = format!("{}:{}", host, port);
-
-    match tokio::net::lookup_host(&socket_addr_str).await {
-        Ok(addrs) => {
-            let mut resolved_any = false;
-            for addr in addrs {
-                resolved_any = true;
-                if !is_public_ip(addr.ip()) {
-                    return Err(SerpError::Blocked(format!(
-                        "Proxy host '{}' resolves to non-public IP: {}",
-                        host,
-                        addr.ip()
-                    )));
-                }
-            }
-            if !resolved_any {
-                return Err(SerpError::InvalidParam(format!(
-                    "Proxy host '{}' resolved to no IP addresses",
-                    host
-                )));
-            }
-        }
-        Err(e) => {
-            return Err(SerpError::InvalidParam(format!(
-                "Could not resolve proxy host '{}': {}",
-                host, e
-            )));
-        }
-    }
+    validate_host_publicity(host, port, "Proxy").await?;
 
     Ok(parsed)
 }
