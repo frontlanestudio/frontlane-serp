@@ -176,6 +176,12 @@ fn build_query(params: &SearchQueryParams, headers: &HeaderMap) -> Query {
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
+    let raw_limit = params.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+    let limit = raw_limit.clamp(1, 100);
+
+    let raw_extract_top = params.extract_top.unwrap_or(1);
+    let extract_top = raw_extract_top.clamp(0, 10);
+
     Query {
         text,
         lang_code: params.lang.clone().unwrap_or_default(),
@@ -183,12 +189,12 @@ fn build_query(params: &SearchQueryParams, headers: &HeaderMap) -> Query {
         date_interval: params.date.clone().unwrap_or_default(),
         filetype: params.file.clone().unwrap_or_default(),
         site: params.site.clone().unwrap_or_default(),
-        limit: params.limit.unwrap_or(DEFAULT_QUERY_LIMIT),
+        limit,
         start: params.start.unwrap_or(0),
         filter: params.filter.unwrap_or(true),
         features: params.features.unwrap_or(true),
         extract: params.extract.unwrap_or(false),
-        extract_top: params.extract_top.unwrap_or(1),
+        extract_top,
         extract_mode: params
             .extract_mode
             .clone()
@@ -496,7 +502,10 @@ pub async fn search_single_handler(
     let format = determine_format(params.format.as_deref(), accept_header);
 
     // Cache lookup
-    let cache_key = format!("{}:{}:{}", normalized_engine, query.text, query.start);
+    let cache_key = format!(
+        "{}:{}:{}:{}:{}:{}",
+        normalized_engine, query.text, query.start, query.limit, query.lang_code, query.region
+    );
     if let Some(cached_json) = state.cache.get(&cache_key).await {
         if let Ok(cached_env) = serde_json::from_str::<Envelope>(&cached_json) {
             return format_response(&cached_env, format);

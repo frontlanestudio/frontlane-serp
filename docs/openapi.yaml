@@ -599,6 +599,95 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequestError"
 
+  /extract/contacts:
+    get:
+      tags: [Search]
+      operationId: extractContactsGet
+      summary: Extract phone numbers, addresses, emails, and social profiles
+      description: >
+        Scans a page or crawls internal pages across a domain to aggregate
+        all discovered email addresses, phone numbers, postal addresses, and
+        social media profile links.
+      parameters:
+        - $ref: "#/components/parameters/URLQuery"
+        - name: crawl
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Crawl internal contact, about, location, and team pages
+        - name: max_pages
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+          description: Maximum pages to scan when crawling (1-50)
+        - name: max_depth
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 2
+          description: Maximum crawl depth (1-4)
+        - $ref: "#/components/parameters/FormatQuery"
+      responses:
+        "200":
+          description: Extracted contact information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactInfo"
+            text/markdown:
+              schema:
+                type: string
+            text/csv:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+    post:
+      tags: [Search]
+      operationId: extractContactsPost
+      summary: Extract phone numbers, addresses, emails, and social profiles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                crawl:
+                  type: boolean
+                  default: false
+                max_pages:
+                  type: integer
+                  default: 10
+                max_depth:
+                  type: integer
+                  default: 2
+                format:
+                  type: string
+                  enum: [json, markdown, csv, text]
+                  default: json
+      responses:
+        "200":
+          description: Extracted contact information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactInfo"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
   /crawl:
     post:
       tags: [Crawl]
@@ -2472,3 +2561,48 @@ components:
           description: >
             Page metadata (source, title, lang, canonical, mode_used, etc.).
             Failed items carry only `source` and `error`.
+
+    AddressInfo:
+      type: object
+      properties:
+        street_address:
+          type: string
+        city:
+          type: string
+        state_or_region:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+        formatted:
+          type: string
+    ContactInfo:
+      type: object
+      properties:
+        target_url:
+          type: string
+        pages_scanned:
+          type: integer
+        took_ms:
+          type: integer
+        emails:
+          type: array
+          items:
+            type: string
+        phones:
+          type: array
+          items:
+            type: string
+        addresses:
+          type: array
+          items:
+            $ref: "#/components/schemas/AddressInfo"
+        social_links:
+          type: array
+          items:
+            type: string
+        sources:
+          type: object
+          additionalProperties:
+            type: string

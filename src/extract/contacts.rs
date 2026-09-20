@@ -722,6 +722,11 @@ pub async fn scan_contacts(
             break;
         }
 
+        // SSRF Guard
+        if validate_public_url(&curr_url).await.is_err() {
+            continue;
+        }
+
         // Fetch page HTML
         let body = match http_client
             .fetch_raw_response(&curr_url, None, None, None, None)
