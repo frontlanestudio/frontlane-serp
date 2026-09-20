@@ -150,7 +150,9 @@ function createErrorResponse(error, details, status) {
 }
 
 function generateRandomIP() {
-  return [1, 2, 3, 4].map(() => Math.floor(Math.random() * 254) + 1).join('.');
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => (b % 254) + 1).join('.');
 }
 "#;
 
@@ -164,5 +166,6 @@ mod tests {
         assert!(FLAREPROX_WORKER_JS.contains("X-Target-URL"));
         assert!(FLAREPROX_WORKER_JS.contains("createProxyRequest"));
         assert!(FLAREPROX_WORKER_JS.contains("generateRandomIP"));
+        assert!(FLAREPROX_WORKER_JS.contains("crypto.getRandomValues"));
     }
 }

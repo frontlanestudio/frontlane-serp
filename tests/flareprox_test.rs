@@ -17,6 +17,7 @@ fn test_worker_script_properties() {
     assert!(FLAREPROX_WORKER_JS.contains("createProxyRequest"));
     assert!(FLAREPROX_WORKER_JS.contains("createProxyResponse"));
     assert!(FLAREPROX_WORKER_JS.contains("generateRandomIP"));
+    assert!(FLAREPROX_WORKER_JS.contains("crypto.getRandomValues"));
     assert!(FLAREPROX_WORKER_JS.contains("Access-Control-Allow-Origin"));
 }
 
