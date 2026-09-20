@@ -200,10 +200,8 @@ async fn probe_single_page(
     let mut enriched = Vec::new();
     let mut features = Vec::new();
 
-    for raw in raw_results {
-        for f in &raw.features {
-            features.push(f.clone());
-        }
+    for mut raw in raw_results {
+        features.append(&mut raw.features);
         let item = enrich_result(raw, engine.name(), start);
         enriched.push(item);
     }
@@ -277,6 +275,7 @@ pub async fn probe_engine_rank(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::types::{SearchResult, SerpFeature, ResultType};
 
     #[test]
     fn test_calculate_pages_to_probe() {
@@ -298,5 +297,54 @@ mod tests {
             calculate_pages_to_probe(RankStrategy::Smart, 45, 5),
             vec![4, 5]
         ); // pos 45 -> page 5 -> [4, 5]
+    }
+
+    #[test]
+    fn test_feature_extraction_correctness() {
+        let mut raw_results = Vec::new();
+        for i in 0..10 {
+            let mut features = Vec::new();
+            for j in 0..5 {
+                features.push(SerpFeature {
+                    id: format!("f_{}_{}", i, j),
+                    engine: "google".to_string(),
+                    feature_type: ResultType::AnswerBox,
+                    title: Some(format!("Title {} {}", i, j)),
+                    text: Some(format!("Text snippet description {} {}", i, j)),
+                    items: vec![],
+                    links: vec![],
+                    source_result_ids: vec![],
+                    position: None,
+                    confidence: Some(0.9),
+                    extracted_at: "2025-01-01T00:00:00Z".to_string(),
+                });
+            }
+            raw_results.push(SearchResult {
+                rank: i as i32 + 1,
+                absolute_rank: i as i32 + 1,
+                result_type: ResultType::Organic,
+                url: format!("https://example.com/page{}", i),
+                title: format!("Page {}", i),
+                description: format!("Description {}", i),
+                ad: false,
+                features,
+                image_data: None,
+                image_source: None,
+            });
+        }
+
+        let mut enriched = Vec::new();
+        let mut features = Vec::new();
+
+        for mut raw in raw_results {
+            features.append(&mut raw.features);
+            let item = enrich_result(raw, "google", 0);
+            enriched.push(item);
+        }
+
+        assert_eq!(enriched.len(), 10);
+        assert_eq!(features.len(), 50);
+        assert_eq!(features[0].id, "f_0_0");
+        assert_eq!(features[49].id, "f_9_4");
     }
 }
