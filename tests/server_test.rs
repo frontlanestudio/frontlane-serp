@@ -44,6 +44,18 @@ async fn test_server_routes_health_and_root() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-content-type-options").unwrap(),
+        "nosniff"
+    );
+    assert_eq!(
+        response.headers().get("x-frame-options").unwrap(),
+        "DENY"
+    );
+    assert_eq!(
+        response.headers().get("x-xss-protection").unwrap(),
+        "1; mode=block"
+    );
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8(body.to_vec()).unwrap();
     assert!(body_str.contains("healthy"));
@@ -319,6 +331,24 @@ async fn test_csv_formatting_envelope() {
     let csv_output = render_csv(&envelope);
     assert!(csv_output.starts_with("rank,title,url,display_url,domain,engine,snippet,result_type"));
     assert!(csv_output.contains("1,\"Test Title with, Comma\",https://example.com/1,example.com/1,example.com,google,\"Test \"\"quoted\"\" description\",Organic"));
+}
+
+#[tokio::test]
+async fn test_extract_contacts_ssrf_rejection() {
+    let app = create_test_app();
+
+    // Internal loopback address should be blocked (403 FORBIDDEN) by SSRF guard
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/extract/contacts?url=http://127.0.0.1:8080/admin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

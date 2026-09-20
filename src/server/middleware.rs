@@ -31,9 +31,22 @@ pub async fn request_id_middleware(mut req: Request, next: Next) -> Response {
         "handled request"
     );
 
-    response.headers_mut().insert(
+    let headers = response.headers_mut();
+    headers.insert(
         "x-request-id",
         HeaderValue::from_str(&request_id).unwrap_or(HeaderValue::from_static("")),
+    );
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "x-frame-options",
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        "x-xss-protection",
+        HeaderValue::from_static("1; mode=block"),
     );
 
     response
