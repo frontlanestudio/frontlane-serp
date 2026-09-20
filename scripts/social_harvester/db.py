@@ -83,32 +83,32 @@ def upsert_account_details(domain, network, handle, details, db_path=DEFAULT_DB_
 def upsert_posts(domain, firm_name, platform, posts, db_path=DEFAULT_DB_PATH):
     if not posts:
         return 0
+    records = []
+    for p in posts:
+        post_url = p["url"]
+        caption = p.get("caption", "")
+        media_url = p.get("media_url") or p.get("image_url", "")
+        post_type = p.get("type", "post")
+        raw_json = json.dumps(p.get("payload", p), ensure_ascii=False)
+        published_at = p.get("date") or p.get("published_at")
+        records.append((domain, firm_name, platform, post_url, post_type, caption, media_url, raw_json, published_at))
+
     for attempt in range(5):
         try:
             conn = get_db_connection(db_path)
             c = conn.cursor()
-            inserted = 0
-            for p in posts:
-                post_url = p["url"]
-                caption = p.get("caption", "")
-                media_url = p.get("media_url") or p.get("image_url", "")
-                post_type = p.get("type", "post")
-                raw_json = json.dumps(p.get("payload", p), ensure_ascii=False)
-                published_at = p.get("date") or p.get("published_at")
-
-                c.execute("""
-                    INSERT INTO competitor_social_posts (
-                        domain, firm_name, platform, post_url, post_type, caption, media_url, raw_json, published_at, downloaded_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(post_url) DO UPDATE SET
-                        post_type=excluded.post_type,
-                        caption=excluded.caption,
-                        media_url=excluded.media_url,
-                        raw_json=excluded.raw_json,
-                        published_at=COALESCE(excluded.published_at, competitor_social_posts.published_at)
-                """, (domain, firm_name, platform, post_url, post_type, caption, media_url, raw_json, published_at))
-                if c.rowcount > 0:
-                    inserted += 1
+            c.executemany("""
+                INSERT INTO competitor_social_posts (
+                    domain, firm_name, platform, post_url, post_type, caption, media_url, raw_json, published_at, downloaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(post_url) DO UPDATE SET
+                    post_type=excluded.post_type,
+                    caption=excluded.caption,
+                    media_url=excluded.media_url,
+                    raw_json=excluded.raw_json,
+                    published_at=COALESCE(excluded.published_at, competitor_social_posts.published_at)
+            """, records)
+            inserted = max(c.rowcount, 0)
             conn.commit()
             conn.close()
             return inserted
