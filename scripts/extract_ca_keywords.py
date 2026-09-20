@@ -66,6 +66,12 @@ REGIONS = {
     }
 }
 
+PRECOMPILED_CITY_PATTERNS = [
+    (region_name, city.title(), re.compile(r'\b' + re.escape(city) + r'\b'))
+    for region_name, cities in REGIONS.items()
+    for city in cities
+]
+
 GENERIC_BOILERPLATE = {
     'home', 'about', 'about us', 'about our firm', 'our firm', 'the firm', 'contact', 'contact us',
     'areas of practice', 'practice areas', 'areas we serve', 'attorneys', 'our attorneys',
@@ -132,6 +138,21 @@ PRACTICE_CATEGORIES = [
     ),
 ]
 
+PI_PRACTICE_CATEGORIES = {
+    "Personal Injury - Motor Vehicle & Tort",
+    "Personal Injury - Specialized Liability",
+    "Workers' Compensation",
+    "Employment & Labor Law",
+    "Lemon Law",
+    "Spanish Legal Services (Abogados)"
+}
+
+SPANISH_KEYWORDS = ('abogado', 'abogados', 'accidente', 'accidentes', 'lesiones', 'consulta', 'gratis', 'espanol')
+
+TITLE_SPLIT_REGEX = re.compile(r'\s*[|–—•·:]\s*|\s+-\s+')
+SEARCHABLE_PREFIX_REGEX = re.compile(r'^(page \d+|archive|untitled|\d{4})')
+NORM_KW_REGEX = re.compile(r'\s+')
+
 def _is_boilerplate_or_brand(clean, dom_stem):
     lower = clean.lower()
     if lower in GENERIC_BOILERPLATE:
@@ -149,7 +170,7 @@ def clean_title_to_keyword(title, domain):
     if not title:
         return None
     dom_stem = domain.split('.')[0].lower()
-    parts = re.split(r'\s*[|–—•·:]\s*|\s+-\s+', title)
+    parts = TITLE_SPLIT_REGEX.split(title)
 
     candidates = [
         p.strip() for p in parts
@@ -170,10 +191,9 @@ def clean_title_to_keyword(title, domain):
     return candidates[0]
 
 def _match_region_cities(text_lower):
-    for region_name, cities in REGIONS.items():
-        for city in cities:
-            if re.search(r'\b' + re.escape(city) + r'\b', text_lower):
-                return region_name, city.title()
+    for region_name, city_title, pattern in PRECOMPILED_CITY_PATTERNS:
+        if pattern.search(text_lower):
+            return region_name, city_title
     return None, None
 
 def detect_area(text, profile_city=None):
@@ -215,71 +235,7 @@ def is_searchable_query(kw):
         return False
     if len(lower.split()) < 2:
         return False
-    return not bool(re.match(r'^(page \d+|archive|untitled|\d{4})', lower))
-
-def main():
-    print(f"Connecting to {DB_PATH}...")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    print(f"Loading Call Jacob keywords from {CALLJACOB_KWS_PATH}...")
-    with open(CALLJACOB_KWS_PATH, 'r') as f:
-        cj_list = json.load(f)
-    cj_keywords_set = set(k['keyword'].strip().lower() for k in cj_list)
-    print(f"Loaded {len(cj_keywords_set)} Call Jacob keywords.")
-
-    print("Querying California sites and page audits...")
-    cursor.execute("""
-        SELECT DISTINCT a.site_domain, p.city, a.audit_json
-        FROM competitor_seo_audits a
-        JOIN competitor_site_profiles csp ON a.site_domain = csp.site_domain
-        JOIN profiles p ON csp.profile_url = p.url
-        WHERE p.state = 'CA'
-    """)
-
-    rows = cursor.fetchall()
-    print(f"Loaded {len(rows)} California site records from database.")
-
-    every_page_records = []
-    unique_keywords_agg = defaultdict(lambda: {
-        "keyword": "",
-        "practice_category": "",
-        "region": "",
-        "city": "",
-        "sites_count": 0,
-        "sample_sites": set(),
-        "sample_urls": set(),
-        "is_calljacob_targeted": False,
-        "is_pi_relevant": False,
-        "language": "English",
-        "is_searchable": False
-    })
-
-    processed_sites = set()
-
-    for site_domain, profile_city, audit_str in rows:
-        if site_domain in processed_sites:
-            continue
-        processed_sites.add(site_domain)
-
-        try:
-            audit = json.loads(audit_str)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            audit = None
-
-        if not audit:
-            continue
-
-PI_PRACTICE_CATEGORIES = {
-    "Personal Injury - Motor Vehicle & Tort",
-    "Personal Injury - Specialized Liability",
-    "Workers' Compensation",
-    "Employment & Labor Law",
-    "Lemon Law",
-    "Spanish Legal Services (Abogados)"
-}
-
-SPANISH_KEYWORDS = ('abogado', 'abogados', 'accidente', 'accidentes', 'lesiones', 'consulta', 'gratis', 'espanol')
+    return not bool(SEARCHABLE_PREFIX_REGEX.match(lower))
 
 def _process_page(p, site_domain, profile_city, cj_keywords_set, cj_list):
     title = p.get("title") or ""
@@ -295,14 +251,14 @@ def _process_page(p, site_domain, profile_city, cj_keywords_set, cj_list):
         if not kw:
             return None
 
-    norm_kw = re.sub(r'\s+', ' ', kw.strip().lower())
+    norm_kw = NORM_KW_REGEX.sub(' ', kw.strip().lower())
     context_text = f"{title} {h1} {' '.join(location_terms)}"
     region, city = detect_area(context_text, profile_city)
     practice_cat = categorize_practice(f"{title} {h1} {kw}", practice_terms)
 
     is_spanish = any(w in norm_kw for w in SPANISH_KEYWORDS)
     is_pi = practice_cat in PI_PRACTICE_CATEGORIES
-    is_cj_targeted = (norm_kw in cj_keywords_set) or any(norm_kw == k['keyword'].lower() for k in cj_list)
+    is_cj_targeted = norm_kw in cj_keywords_set
 
     return {
         "site_domain": site_domain,
@@ -401,6 +357,8 @@ def main():
     with open(CALLJACOB_KWS_PATH, 'r') as f:
         cj_list = json.load(f)
     cj_keywords_set = set(k['keyword'].strip().lower() for k in cj_list)
+    for k in cj_list:
+        cj_keywords_set.add(k['keyword'].lower())
     print(f"Loaded {len(cj_keywords_set)} Call Jacob keywords.")
 
     print("Querying California sites and page audits...")
@@ -425,15 +383,16 @@ def main():
     processed_sites = set()
 
     for site_domain, profile_city, audit_str in rows:
-        if site_domain in processed_sites:
+        if site_domain in processed_sites or not audit_str:
             continue
         processed_sites.add(site_domain)
 
         try:
             audit = json.loads(audit_str)
         except (json.JSONDecodeError, TypeError, ValueError):
-            audit = None
-        if not audit:
+            continue
+
+        if not isinstance(audit, dict):
             continue
 
         for p in audit.get("pages", []):
