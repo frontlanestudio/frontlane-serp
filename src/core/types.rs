@@ -115,6 +115,7 @@ pub enum ResultType {
     Calculator,
     Weather,
     Dictionary,
+    LocalServicesAds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

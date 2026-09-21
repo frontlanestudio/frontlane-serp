@@ -1578,3 +1578,53 @@ pub async fn job_status_handler(
             .into_response(),
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct TrendsQueryParams {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default = "default_trends_geo")]
+    pub geo: String,
+    #[serde(default = "default_trends_time")]
+    pub time: String,
+}
+
+fn default_trends_geo() -> String {
+    "US".to_string()
+}
+
+fn default_trends_time() -> String {
+    "today 1-m".to_string()
+}
+
+pub async fn trends_handler(
+    AxumQuery(params): AxumQuery<TrendsQueryParams>,
+) -> Response {
+    let kw = params.q.as_deref().or(params.query.as_deref()).unwrap_or("");
+    if kw.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "Missing required parameter 'q' or 'query'" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let client = crate::trends::GoogleTrendsClient::new();
+    match client.get_trends(kw, &params.geo, &params.time).await {
+        Ok(result) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            serde_json::to_string(&result).unwrap_or_default(),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": e.to_string() }).to_string(),
+        )
+            .into_response(),
+    }
+}

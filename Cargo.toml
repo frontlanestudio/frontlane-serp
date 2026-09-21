@@ -44,6 +44,7 @@ base64 = "0.22"
 md-5 = "0.11.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
+frontlane-net = { path = "../frontlane-net", features = ["impersonate"] }
 
 [features]
 default = []

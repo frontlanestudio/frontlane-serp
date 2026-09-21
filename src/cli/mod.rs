@@ -73,6 +73,9 @@ pub enum Commands {
 
     /// Deploy and manage Frontlane SERP on Cloudflare Workers edge network
     Edge(EdgeArgs),
+
+    /// Track search demand volume, breakouts, & velocity via Google Search Trends
+    Trends(TrendsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -308,6 +311,14 @@ pub struct RankArgs {
     #[arg(short, long, default_value = "desktop")]
     pub device: String,
 
+    /// Target geographic location for local SERP / uule (e.g. "Burbank, CA", "Glendale, CA")
+    #[arg(long, default_value = "")]
+    pub location: String,
+
+    /// Target region or country code (e.g. us, de, uk)
+    #[arg(long, default_value = "us")]
+    pub region: String,
+
     /// Output format: json, text
     #[arg(short, long, value_enum, default_value = "text")]
     pub format: CliFormat,
@@ -511,4 +522,22 @@ pub enum EdgeAction {
         #[arg(long, default_value = "frontlane-serp-edge")]
         name: String,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct TrendsArgs {
+    /// Keyword or query to analyze on Google Trends
+    pub query: String,
+
+    /// Geographic region (e.g. US, US-CA, US-TX, US-NY)
+    #[arg(short, long, default_value = "US")]
+    pub geo: String,
+
+    /// Timeframe resolution (now 1-d, today 1-m, today 3-m, today 12-m)
+    #[arg(short, long, default_value = "today 1-m")]
+    pub time: String,
+
+    /// Output format: text or json
+    #[arg(short = 'F', long, value_enum, default_value = "text")]
+    pub format: CliFormat,
 }

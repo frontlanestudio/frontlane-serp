@@ -15,24 +15,7 @@ use chrono::Utc;
 
 /// Detects whether an HTTP response is a Cloudflare JavaScript / Turnstile / Managed Challenge page.
 pub fn is_cloudflare_challenge(status: reqwest::StatusCode, body: &str) -> bool {
-    // Cloudflare challenges typically return 403 Forbidden or 503 Service Unavailable,
-    // or sometimes 200 with an interstitial challenge template.
-    let status_code = status.as_u16();
-    let is_challenge_status = status_code == 403 || status_code == 503 || status_code == 429;
-
-    let body_lower = body.to_lowercase();
-    let has_challenge_marker = body_lower.contains("attention required! | cloudflare")
-        || body_lower.contains("cf-wrapper")
-        || body_lower.contains("cf-chl-widget")
-        || body_lower.contains("cf-turnstile")
-        || body_lower.contains("checking your browser")
-        || body_lower.contains("just a moment...")
-        || body_lower.contains("cf-challenge-running")
-        || body_lower.contains("cf-alert")
-        || body_lower.contains("please enable cookies");
-
-    is_challenge_status && has_challenge_marker
-        || (has_challenge_marker && body_lower.contains("cloudflare"))
+    frontlane_net::detector::detect_cloudflare(status.as_u16(), body).is_some()
 }
 
 /// Scans a (non-Cloudflare-challenge) page body for a reCAPTCHA v2/v3 or

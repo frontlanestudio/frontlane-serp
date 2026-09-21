@@ -156,12 +156,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Edge(edge_args)) => {
             handle_edge(&edge_args, &config).await?;
         }
+        Some(Commands::Trends(trends_args)) => {
+            handle_trends(&trends_args).await?;
+        }
         None => {
             // Default action: start server
             run_server(config, engines, http_client).await?;
         }
     }
 
+    Ok(())
+}
+
+async fn handle_trends(args: &frontlane_serp::cli::TrendsArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let client = frontlane_serp::trends::GoogleTrendsClient::new();
+    let format_str = match args.format {
+        frontlane_serp::cli::CliFormat::Json => "json",
+        _ => "text",
+    };
+    let res = client
+        .get_trends(&args.query, &args.geo, &args.time)
+        .await
+        .map_err(|e| e.to_string())?;
+    res.print_summary(format_str);
     Ok(())
 }
 
@@ -328,7 +345,13 @@ fn build_rank_request(args: &RankArgs) -> RankRequest {
         smart_full_fallback: args.fallback,
         r#match: match_mode,
         device,
-        region: "US".to_string(),
+        region: if !args.location.is_empty() {
+            args.location.clone()
+        } else if !args.region.is_empty() {
+            args.region.clone()
+        } else {
+            "US".to_string()
+        },
         lang: "en".to_string(),
     }
 }

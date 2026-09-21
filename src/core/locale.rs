@@ -146,6 +146,7 @@ fn city_canonical(city: &str) -> &'static str {
         "boston" => "Boston,Massachusetts,United States",
         "brussels" => "Brussels,Brussels,Belgium",
         "buenos aires" => "Buenos Aires,Buenos Aires,Argentina",
+        "burbank" => "Burbank,California,United States",
         "cairo" => "Cairo,Cairo Governorate,Egypt",
         "chicago" => "Chicago,Illinois,United States",
         "copenhagen" => "Copenhagen,Capital Region of Denmark,Denmark",
@@ -154,6 +155,7 @@ fn city_canonical(city: &str) -> &'static str {
         "dubai" => "Dubai,Dubai,United Arab Emirates",
         "dublin" => "Dublin,County Dublin,Ireland",
         "frankfurt" => "Frankfurt am Main,Hessen,Germany",
+        "glendale" => "Glendale,California,United States",
         "hamburg" => "Hamburg,Hamburg,Germany",
         "helsinki" => "Helsinki,Helsinki,Uusimaa,Finland",
         "hong kong" => "Hong Kong,Hong Kong",
@@ -179,6 +181,7 @@ fn city_canonical(city: &str) -> &'static str {
         "osaka" => "Osaka,Osaka,Japan",
         "oslo" => "Oslo,Oslo,Norway",
         "paris" => "Paris,Paris,Ile-de-France,France",
+        "pasadena" => "Pasadena,California,United States",
         "prague" => "Prague,Prague,Czechia",
         "rio de janeiro" => "Rio de Janeiro,State of Rio de Janeiro,Brazil",
         "rome" => "Rome,Rome,Lazio,Italy",
@@ -227,8 +230,12 @@ pub fn resolve_region(region: &str) -> RegionTarget {
         t.google_canonical = city.to_string();
         return t;
     }
-    if region.chars().filter(|&c| c == ',').count() >= 2 {
-        t.google_canonical = region.to_string();
+    if region.contains(',') {
+        if region.chars().filter(|&c| c == ',').count() == 1 {
+            t.google_canonical = format!("{},United States", region);
+        } else {
+            t.google_canonical = region.to_string();
+        }
         return t;
     }
     t

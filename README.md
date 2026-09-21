@@ -285,6 +285,16 @@ curl -X POST "http://127.0.0.1:7000/v1/rank/batch" \
   }'
 ```
 
+### 8. Google Search Trends & Demand Velocity (`/api/trends`)
+
+Extract search interest timelines, 7-day velocity deltas, breakout queries, and DMA/metro interest distributions:
+
+```bash
+# Query trends via REST endpoint
+curl "http://127.0.0.1:7000/api/trends?q=dental+implants&geo=US-CA&time=today+1-m"
+```
+
+
 ---
 
 ## Cloudflare & Anti-Bot Handling
@@ -398,6 +408,10 @@ frontlane-serp batch-rank --target calljacob.com --file calljacob_keywords.csv -
 
 # Keyword suggestions
 frontlane-serp suggest "async rust" --engine google
+
+# Google Search Trends & Demand Velocity
+frontlane-serp trends "dental implants" --geo US-CA --time "today 1-m"
+frontlane-serp trends "personal injury lawyer" --geo US --format json
 
 # Extract contact info (phone numbers, physical addresses, emails, social profiles)
 frontlane-serp contacts https://example.com

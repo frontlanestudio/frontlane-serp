@@ -59,6 +59,28 @@ const GOOGLE_FEATURE_SPECS: &[SerpFeatureSelector] = &[
         confidence: 0.6,
         single_match: false,
     },
+    SerpFeatureSelector {
+        feature_type: ResultType::LocalServicesAds,
+        title: "Google Guaranteed / Local Services Ads",
+        container: &[
+            "div[data-attrid*='local_services_ads']",
+            "div[data-attrid*='kc:/location/location:local_services_ads']",
+            "div.xpdclose:has(div.uE30Ze)",
+            "div.GLkC4d",
+        ],
+        title_selector: &["div[role='heading']", "h2", "h3"],
+        text_selector: &["span.r2WbTd", "div.z5rAub"],
+        item_selector: &[
+            "div.uE30Ze",
+            "div.vw5Aee",
+            "div.kno-fb-ctx",
+            "div[data-record-click-time]",
+        ],
+        link_selector: &["a[href^='http']", "a[data-ved]"],
+        position: 0,
+        confidence: 0.85,
+        single_match: true,
+    },
 ];
 
 pub fn extract_google_features(doc: &Html) -> Vec<SerpFeature> {

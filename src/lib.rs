@@ -13,3 +13,4 @@ pub mod mega;
 pub mod rank;
 pub mod server;
 pub mod suggest;
+pub mod trends;
