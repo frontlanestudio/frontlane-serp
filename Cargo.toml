@@ -1,6 +1,6 @@
 [package]
 name = "frontlane-serp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Brandon Hubbard <bhubbard@hubbardlabs.com>", "Frontlane Studio"]
 description = "A fast, open-source SERP API and CLI in Rust for Google, Bing, DuckDuckGo, Yandex, Baidu, and Ecosia."

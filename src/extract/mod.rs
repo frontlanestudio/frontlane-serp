@@ -1,10 +1,13 @@
+pub mod ads;
 pub mod contacts;
 pub mod llmstxt;
 pub mod readability;
 
+pub use ads::{parse_serp_sponsored_ads, SerpAdExtension, SerpSponsoredAd};
 pub use contacts::{
     extract_contacts_from_html, scan_contacts, AddressInfo, ContactInfo, PageContacts,
 };
+pub use llmstxt::{parse_llms_txt, LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection};
 
 use crate::core::captcha::{CaptchaChallengeKind, CaptchaSolver, CloudflareClearance};
 use crate::core::error::Result;
@@ -90,7 +93,7 @@ fn query_param(url: &str, param: &str) -> Option<String> {
     None
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Extractor {
     http_client: HttpClient,
     solver: Option<CaptchaSolver>,

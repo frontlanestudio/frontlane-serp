@@ -9,7 +9,7 @@ use crate::core::http_client::HttpClient;
 use crate::core::types::{Query, SearchResult};
 use async_trait::async_trait;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Yandex {
     http_client: HttpClient,
 }

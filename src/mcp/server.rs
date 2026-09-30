@@ -141,6 +141,18 @@ pub struct McpServerContext {
     pub crawler: Arc<crate::crawl::Crawler>,
 }
 
+impl std::fmt::Debug for McpServerContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpServerContext")
+            .field("engines_count", &self.engines.len())
+            .field("mega", &self.mega)
+            .field("extractor", &self.extractor)
+            .field("suggest", &self.suggest)
+            .field("crawler", &self.crawler)
+            .finish()
+    }
+}
+
 pub async fn handle_tool_call(
     name: &str,
     args: serde_json::Value,

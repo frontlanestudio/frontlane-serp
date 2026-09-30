@@ -4,7 +4,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use frontlane_serp::cli::{
     AuditArgs, BatchRankArgs, Cli, CliFormat, Commands, ContactsArgs, CrawlArgs, ExtractArgs,
-    FlareproxAction, FlareproxArgs, McpAction, RankArgs, SearchArgs, SuggestArgs,
+    FlareproxAction, FlareproxArgs, GeoAction, GeoArgs, McpAction, RankArgs, SearchArgs, SuggestArgs,
 };
 use frontlane_serp::config::AppConfig;
 use frontlane_serp::core::engine::SearchEngine;
@@ -159,11 +159,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Trends(trends_args)) => {
             handle_trends(&trends_args).await?;
         }
+        Some(Commands::Geo(geo_args)) => {
+            handle_geo(&geo_args, &engines).await?;
+        }
         None => {
             // Default action: start server
             run_server(config, engines, http_client).await?;
         }
     }
+
+    Ok(())
+}
+
+async fn handle_geo(
+    args: &GeoArgs,
+    engines: &[Arc<dyn SearchEngine>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (query, target, engine_name, format) = match &args.action {
+        Some(GeoAction::Citations {
+            query,
+            target,
+            engine,
+            format,
+        }) => (query.clone(), target.clone(), engine.clone(), *format),
+        None => {
+            let q = args.query.clone().ok_or("Query is required. Use 'frontlane-serp geo <query>' or 'frontlane-serp geo citations <query>'")?;
+            (q, args.target.clone(), args.engine.clone(), args.format)
+        }
+    };
+
+    let norm_engine = match engine_name.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        "hn" => "hackernews".to_string(),
+        "gh" => "github".to_string(),
+        "wiki" => "wikipedia".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = engines
+        .iter()
+        .find(|e| e.name().eq_ignore_ascii_case(&norm_engine))
+        .ok_or_else(|| format!("Unknown engine: {}", engine_name))?;
+
+    let q = Query {
+        text: query.clone(),
+        filter: false,
+        features: true,
+        limit: 10,
+        ..Default::default()
+    };
+
+    let results = engine.search(&q).await?;
+    let report = frontlane_serp::geo::analyze_results(
+        &query,
+        &norm_engine,
+        &results,
+        target.as_deref(),
+    );
+
+    let format_str = match format {
+        frontlane_serp::cli::CliFormat::Json => "json",
+        _ => "text",
+    };
+    report.print_summary(format_str);
 
     Ok(())
 }

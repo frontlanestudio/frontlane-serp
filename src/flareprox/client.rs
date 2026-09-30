@@ -55,6 +55,16 @@ pub struct CloudflareClient {
     worker_prefix: String,
 }
 
+impl std::fmt::Debug for CloudflareClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudflareClient")
+            .field("account_id", &self.account_id)
+            .field("worker_prefix", &self.worker_prefix)
+            .field("api_token", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[derive(Deserialize)]
 struct CfResponse<T> {
     success: bool,

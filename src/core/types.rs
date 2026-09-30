@@ -180,7 +180,13 @@ pub struct ExtractedContent {
     pub captcha_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GeoCoordinates {
+    pub lat: f64,
+    pub lng: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FeatureItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -188,6 +194,24 @@ pub struct FeatureItem {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviews_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub place_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hours: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coordinates: Option<GeoCoordinates>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -428,3 +428,36 @@ async fn test_server_docs_and_openapi_endpoints() {
     assert!(body_str.contains("\"docs_url\":\"/docs\""));
     assert!(body_str.contains("\"openapi_url\":\"/openapi.yaml\""));
 }
+
+#[tokio::test]
+async fn test_server_geo_citations_validation() {
+    let app = create_test_app();
+
+    // 1. Missing q parameter -> 400 Bad Request
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/geo/citations")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // 2. Unsupported engine -> 400 Bad Request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/geo/citations?q=dental+implants&engine=nonexistent")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+

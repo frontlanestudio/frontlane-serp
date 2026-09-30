@@ -185,6 +185,7 @@ fn selected_feature_items(container: &ElementRef, selectors: &[&str]) -> Vec<Fea
                     title: Some(final_title),
                     text: Some(final_text),
                     link,
+                    ..Default::default()
                 });
             }
         }

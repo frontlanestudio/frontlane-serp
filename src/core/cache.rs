@@ -56,6 +56,14 @@ pub struct ResponseCache {
     cache: Option<Cache<String, String>>,
 }
 
+impl std::fmt::Debug for ResponseCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResponseCache")
+            .field("enabled", &self.cache.is_some())
+            .finish()
+    }
+}
+
 impl ResponseCache {
     pub fn new(ttl_seconds: u64, max_size: u64) -> Self {
         if ttl_seconds == 0 || max_size == 0 {

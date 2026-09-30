@@ -1628,3 +1628,83 @@ pub async fn trends_handler(
             .into_response(),
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct GeoQueryParams {
+    pub q: Option<String>,
+    pub query: Option<String>,
+    pub target: Option<String>,
+    #[serde(default = "default_geo_engine")]
+    pub engine: String,
+}
+
+fn default_geo_engine() -> String {
+    "google".to_string()
+}
+
+pub async fn geo_citations_handler(
+    State(state): State<AppState>,
+    AxumQuery(params): AxumQuery<GeoQueryParams>,
+) -> Response {
+    let kw = params.q.as_deref().or(params.query.as_deref()).unwrap_or("");
+    if kw.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": "Missing required parameter 'q' or 'query'" }).to_string(),
+        )
+            .into_response();
+    }
+
+    let norm_engine = match params.engine.to_lowercase().as_str() {
+        "ddg" | "duck" => "duckduckgo".to_string(),
+        "hn" => "hackernews".to_string(),
+        "gh" => "github".to_string(),
+        "wiki" => "wikipedia".to_string(),
+        n => n.to_string(),
+    };
+
+    let engine = match state.engines.get(&norm_engine) {
+        Some(e) => e.clone(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json!({ "error": format!("Unsupported engine: {}", params.engine) }).to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let query = Query {
+        text: kw.to_string(),
+        filter: false,
+        features: true,
+        limit: 10,
+        ..Default::default()
+    };
+
+    match engine.search(&query).await {
+        Ok(results) => {
+            let report = crate::geo::analyze_results(
+                kw,
+                &norm_engine,
+                &results,
+                params.target.as_deref(),
+            );
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                serde_json::to_string(&report).unwrap_or_default(),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            json!({ "error": e.to_string() }).to_string(),
+        )
+            .into_response(),
+    }
+}
+

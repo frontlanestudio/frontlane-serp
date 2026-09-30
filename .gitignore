@@ -98,3 +98,6 @@ exports/
 *.sublime-project
 *.sublime-workspace
 .fleet/
+coverage_report
+target/coverage
+.github/workflows/coverage.yml

@@ -20,6 +20,15 @@ pub struct MegaSearcher {
     extractor: Option<Extractor>,
 }
 
+impl std::fmt::Debug for MegaSearcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MegaSearcher")
+            .field("engines_count", &self.engines.len())
+            .field("extractor", &self.extractor)
+            .finish()
+    }
+}
+
 impl MegaSearcher {
     pub fn new(engines: Vec<Arc<dyn SearchEngine>>, extractor: Option<Extractor>) -> Self {
         let mut map = HashMap::new();

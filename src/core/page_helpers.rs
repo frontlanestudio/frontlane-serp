@@ -1,6 +1,7 @@
 use crate::core::error::{Result, SerpError};
 use scraper::{Html, Selector};
 
+#[derive(Debug, Clone, Copy)]
 pub struct DocSignals<'a> {
     pub captcha_selectors: &'a [&'a str],
     pub captcha_markers: &'a [&'a str],
@@ -51,6 +52,7 @@ pub fn normalize_whitespace(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RankState {
     pub organic_rank: i32,
     pub ad_rank: i32,

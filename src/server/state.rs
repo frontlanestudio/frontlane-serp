@@ -30,6 +30,15 @@ pub struct AppState {
     pub crawler: Arc<crate::crawl::Crawler>,
 }
 
+impl std::fmt::Debug for AppState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState")
+            .field("config", &self.config)
+            .field("engines_count", &self.engines.len())
+            .finish()
+    }
+}
+
 impl AppState {
     pub fn new(
         config: AppConfig,

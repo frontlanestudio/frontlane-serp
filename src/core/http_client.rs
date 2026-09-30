@@ -37,7 +37,7 @@ impl BrowserPlatform {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct HttpClient {
     client: Client,
     default_ua: String,

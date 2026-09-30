@@ -71,6 +71,9 @@ pub fn create_router(state: AppState) -> Router {
         // Google Search Trends
         .route("/api/trends", get(trends_handler))
         .route("/trends", get(trends_handler))
+        // Generative Engine Optimization (GEO) & AI Citations
+        .route("/api/geo/citations", get(geo_citations_handler))
+        .route("/geo/citations", get(geo_citations_handler))
         // Asynchronous Batch Jobs
         .route("/v1/rank/batch", post(batch_rank_handler))
         .route("/v1/jobs/{id}", get(job_status_handler))

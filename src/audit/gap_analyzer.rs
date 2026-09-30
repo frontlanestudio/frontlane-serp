@@ -1,6 +1,9 @@
 use crate::audit::types::{GapInsight, PageAuditResult, SerpBenchmark};
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GapAnalysisOutput {
     pub benchmarks: SerpBenchmark,
     pub insights: Vec<GapInsight>,

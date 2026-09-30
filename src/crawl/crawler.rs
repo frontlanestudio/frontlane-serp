@@ -71,7 +71,7 @@ pub struct CrawlResult {
     pub pages: Vec<CrawledPage>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Crawler {
     http_client: HttpClient,
     extractor: Arc<Extractor>,

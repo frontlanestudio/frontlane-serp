@@ -91,7 +91,7 @@ impl CircuitBreaker {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ResilientSearcher {
     circuit_breakers: Arc<Mutex<HashMap<String, CircuitBreaker>>>,
     max_retries: usize,

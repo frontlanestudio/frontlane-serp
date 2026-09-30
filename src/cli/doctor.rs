@@ -8,6 +8,7 @@ use crate::core::http_client::HttpClient;
 use crate::core::types::Query;
 use crate::mcp::installer::get_all_targets;
 
+#[derive(Debug, Clone, Default)]
 pub struct DoctorOptions {
     pub skip_engines: bool,
     pub specific_engine: Option<String>,

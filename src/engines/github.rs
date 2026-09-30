@@ -8,7 +8,7 @@ use crate::core::error::{Result, SerpError};
 use crate::core::http_client::HttpClient;
 use crate::core::types::{Query, ResultType, SearchResult};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GitHub {
     http_client: HttpClient,
 }

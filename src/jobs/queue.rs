@@ -19,6 +19,14 @@ pub struct JobManager {
     http_client: HttpClient,
 }
 
+impl std::fmt::Debug for JobManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobManager")
+            .field("http_client", &self.http_client)
+            .finish()
+    }
+}
+
 impl JobManager {
     pub fn new(http_client: HttpClient) -> Self {
         let jobs = Cache::builder()

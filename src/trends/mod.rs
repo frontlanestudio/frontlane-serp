@@ -94,7 +94,7 @@ impl TrendsResult {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GoogleTrendsClient {
     client: Client,
     #[allow(dead_code)]
@@ -443,6 +443,7 @@ impl GoogleTrendsClient {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

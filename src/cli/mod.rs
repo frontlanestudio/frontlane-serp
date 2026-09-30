@@ -76,6 +76,9 @@ pub enum Commands {
 
     /// Track search demand volume, breakouts, & velocity via Google Search Trends
     Trends(TrendsArgs),
+
+    /// Analyze Generative Engine Optimization (GEO) & AI Citation Share of Voice
+    Geo(GeoArgs),
 }
 
 #[derive(Args, Debug)]
@@ -541,3 +544,46 @@ pub struct TrendsArgs {
     #[arg(short = 'F', long, value_enum, default_value = "text")]
     pub format: CliFormat,
 }
+
+#[derive(Args, Debug)]
+pub struct GeoArgs {
+    #[command(subcommand)]
+    pub action: Option<GeoAction>,
+
+    /// Query or keyword to analyze (when not using subcommand)
+    pub query: Option<String>,
+
+    /// Target domain to calculate specific Share of Voice for (e.g. example.com)
+    #[arg(short, long)]
+    pub target: Option<String>,
+
+    /// Search engine to probe (google, bing, ecosia)
+    #[arg(short, long, default_value = "google")]
+    pub engine: String,
+
+    /// Output format: text or json
+    #[arg(short = 'F', long, value_enum, default_value = "text")]
+    pub format: CliFormat,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GeoAction {
+    /// Analyze AI Overview citations and domain Share of Voice
+    Citations {
+        /// Keyword or query to probe
+        query: String,
+
+        /// Target domain to calculate specific Share of Voice for
+        #[arg(short, long)]
+        target: Option<String>,
+
+        /// Search engine to probe (default: google)
+        #[arg(short, long, default_value = "google")]
+        engine: String,
+
+        /// Output format: text or json
+        #[arg(short = 'F', long, value_enum, default_value = "text")]
+        format: CliFormat,
+    },
+}
+

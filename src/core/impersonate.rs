@@ -86,6 +86,14 @@ mod imp {
         label: &'static str,
     }
 
+    impl std::fmt::Debug for ImpersonatingClient {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ImpersonatingClient")
+                .field("label", &self.label)
+                .finish()
+        }
+    }
+
     impl ImpersonatingClient {
         fn new(
             proxy_url: Option<&str>,
@@ -174,6 +182,14 @@ mod imp {
     #[derive(Clone)]
     pub struct ImpersonationPool {
         clients: Vec<ImpersonatingClient>,
+    }
+
+    impl std::fmt::Debug for ImpersonationPool {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ImpersonationPool")
+                .field("profiles_count", &self.clients.len())
+                .finish()
+        }
     }
 
     impl ImpersonationPool {
@@ -289,7 +305,7 @@ mod imp {
     /// Stub used on Windows builds or when the `impersonate` feature is not enabled.
     /// `new()` always errors so callers take the same fallback-to-plain-client path
     /// they'd take for any other client-construction failure.
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct ImpersonatingClient {
         _private: (),
     }
@@ -308,7 +324,7 @@ mod imp {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct ImpersonationPool {
         _private: (),
     }

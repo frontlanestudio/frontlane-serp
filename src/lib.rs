@@ -7,6 +7,7 @@ pub mod crawl;
 pub mod engines;
 pub mod extract;
 pub mod flareprox;
+pub mod geo;
 pub mod jobs;
 pub mod mcp;
 pub mod mega;
@@ -14,3 +15,7 @@ pub mod rank;
 pub mod server;
 pub mod suggest;
 pub mod trends;
+
+pub use extract::ads::{parse_serp_sponsored_ads, SerpAdExtension, SerpSponsoredAd};
+pub use geo::ai_engine::{AiAnswerCitation, AiEngineResponse, AiEngineType, GeoProber};
+pub use rank::volatility::{RankDelta, RankMovement, SerpVolatilityIndex};
