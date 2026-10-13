@@ -8,13 +8,6 @@ server:
 app:
   log_format: text
   timeout: 15
-  # Route page extraction and crawling requests through a browser TLS/HTTP2
-  # fingerprint (JA3/JA4) impersonation client so they aren't distinguishable
-  # from real Chrome at the TLS handshake level (search engine scraping is
-  # unaffected either way). Falls back to the plain HTTP client automatically
-  # if the impersonating client can't be built or a request through it fails.
-  # Not available on Windows builds. See src/core/impersonate.rs.
-  browser_impersonation: true
   browser_path: ''
   profiles: ''
   head: false
@@ -25,6 +18,7 @@ app:
   max_processes: 6
   idle_ttl: 5m
   mega_timeout: 90s
+  browser_impersonation: true
 extract:
   enabled: true
   default_mode: auto
@@ -36,6 +30,56 @@ proxies:
   global: null
   entries:
   - url: https://flareprox-1788669654-httttt.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362694-nnnnvv.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362695-vvvvvv.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362696-ffffff.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362697-ffffff.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362698-ffffff.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362699-ffffff.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362700-nnnnnn.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362701-vvhhhh.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362702-dddddd.frontlane-studio.workers.dev
+    tags:
+    - flareprox
+    - cf
+    - rotating
+  - url: https://flareprox-1789362703-pppppp.frontlane-studio.workers.dev
     tags:
     - flareprox
     - cf
@@ -59,14 +103,6 @@ cors:
   allow_methods: GET, POST, OPTIONS
   allow_headers: Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant, X-Use-Profile
   max_age: 86400
-# Same solver/provider/key handles Cloudflare's Turnstile (extraction and
-# crawling requests, resolved automatically into a reusable cf_clearance
-# cookie -- see app.browser_impersonation above) as well as reCAPTCHA v2/v3
-# and hCaptcha challenges detected directly on a page. Provider is
-# "capsolver" or "2captcha" -- unlike Turnstile, a solved reCAPTCHA/hCaptcha
-# token isn't reusable and has to be submitted to whatever the page itself
-# expects; see ExtractedContent.captcha_challenge / .captcha_site_key /
-# .captcha_token in the extract/crawl API response.
 captcha:
   solver_enabled: false
   provider: capsolver
@@ -78,39 +114,19 @@ flareprox:
   worker_prefix: flareprox
   workers:
   - https://flareprox-1788669654-httttt.frontlane-studio.workers.dev
-yandex:
-  rate_requests: 60
-  rate_burst: 3
-  proxy: null
-  captcha: null
-baidu:
-  rate_requests: 60
-  rate_burst: 3
-  proxy: null
-  captcha: null
-bing:
-  rate_requests: 60
-  rate_burst: 3
-  proxy: null
-  captcha: null
-ecosia:
-  rate_requests: 60
-  rate_burst: 3
-  proxy: null
-  captcha: null
-crates:
-  rate_requests: 60
-  rate_burst: 5
-  proxy: null
-  captcha: null
+  - https://flareprox-1789362694-nnnnvv.frontlane-studio.workers.dev
+  - https://flareprox-1789362695-vvvvvv.frontlane-studio.workers.dev
+  - https://flareprox-1789362696-ffffff.frontlane-studio.workers.dev
+  - https://flareprox-1789362697-ffffff.frontlane-studio.workers.dev
+  - https://flareprox-1789362698-ffffff.frontlane-studio.workers.dev
+  - https://flareprox-1789362699-ffffff.frontlane-studio.workers.dev
+  - https://flareprox-1789362700-nnnnnn.frontlane-studio.workers.dev
+  - https://flareprox-1789362701-vvhhhh.frontlane-studio.workers.dev
+  - https://flareprox-1789362702-dddddd.frontlane-studio.workers.dev
+  - https://flareprox-1789362703-pppppp.frontlane-studio.workers.dev
 github:
   rate_requests: 60
   rate_burst: 5
-  proxy: null
-  captcha: null
-duckduckgo:
-  rate_requests: 60
-  rate_burst: 3
   proxy: null
   captcha: null
 hackernews:
@@ -123,8 +139,38 @@ google:
   rate_burst: 3
   proxy: null
   captcha: null
+crates:
+  rate_requests: 60
+  rate_burst: 5
+  proxy: null
+  captcha: null
+ecosia:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
+duckduckgo:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
+bing:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
+yandex:
+  rate_requests: 60
+  rate_burst: 3
+  proxy: null
+  captcha: null
 wikipedia:
   rate_requests: 120
   rate_burst: 10
+  proxy: null
+  captcha: null
+baidu:
+  rate_requests: 60
+  rate_burst: 3
   proxy: null
   captcha: null
